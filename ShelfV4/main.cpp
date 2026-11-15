@@ -15,6 +15,8 @@
 #include <Wire.h>
 #include <U8g2lib.h>
 #include <esp_heap_caps.h>
+#include <esp_sleep.h>
+#include <driver/rtc_io.h>
 #include <sys/time.h>
 #include <algorithm>
 #include <esp_netif.h>
@@ -333,6 +335,33 @@ static void wifiScanTick() {
   Serial.printf("[shelf] Wi-Fi scan: %d networks\n", n < 0 ? 0 : n);
   scanDoneAt = millis(); scanState = 2;
 }
+// ------------------------------------------------------------ deep sleep
+// Almost everything off (Wi-Fi, LoRa and 2.4 GHz Coms, screen, LED) until the BOOT/PRG button is
+// pressed, or a set time passes. Waking up is a normal start. (On a dev board the USB chip and the
+// red power LED stay powered, so it never gets as low as the chip alone.)
+#if defined(SHELF_ESP32)
+#define WAKE_BUTTON "BOOT"
+#else
+#define WAKE_BUTTON "PRG"
+#endif
+static uint32_t sleepAt = 0, sleepMinutes = 0;
+static void goDeepSleep() {
+  Serial.printf("[shelf] deep sleep %s\n", sleepMinutes ? (String("for ") + sleepMinutes + " min or until " WAKE_BUTTON).c_str() : "until " WAKE_BUTTON);
+  if (sleepMinutes) oledMsg("Deep sleep", "Press " WAKE_BUTTON " to wake", (String("or in ") + sleepMinutes + " min").c_str());
+  else oledMsg("Deep sleep", "Press " WAKE_BUTTON " to wake");
+  delay(1500);
+  oledPower(1);
+  comsSleep();
+  ledOff();
+  WiFi.disconnect(true); WiFi.mode(WIFI_OFF);
+  if (onSD) SD.end();
+  Serial.flush();
+  rtc_gpio_pullup_en((gpio_num_t)PIN_BUTTON); rtc_gpio_pulldown_dis((gpio_num_t)PIN_BUTTON);
+  esp_sleep_enable_ext0_wakeup((gpio_num_t)PIN_BUTTON, 0);
+  if (sleepMinutes) esp_sleep_enable_timer_wakeup((uint64_t)sleepMinutes * 60ULL * 1000000ULL);
+  esp_deep_sleep_start();
+}
+
 static void onJoined() {
   staOK = true;
   Serial.printf("[shelf] joined \"%s\" as %s\n", wifiSSID.c_str(), WiFi.localIP().toString().c_str());
@@ -413,6 +442,12 @@ bool handleBoardApi(AsyncWebServerRequest* r, const String& url, WebRequestMetho
     sendJson(r, 200, String("{\"ok\":true,\"restart\":") + (restart ? "true" : "false") + "}");
     if (restart) rebootSoon = true;
     return true;
+  }
+  if (url == "/api/board/sleep") {           // deep sleep until the button, or for so many minutes
+    long mins = b["minutes"] | 0L;
+    if (mins < 0 || mins > 7L * 24 * 60) { sendErr(r, 400, "Pick up to a week."); return true; }
+    sleepMinutes = (uint32_t)mins; sleepAt = millis() + 1500;
+    sendJson(r, 200, String("{\"ok\":true,\"minutes\":") + mins + "}"); return true;
   }
   if (url == "/api/board/reboot") { sendJson(r, 200, "{\"ok\":true}"); rebootSoon = true; return true; }
   return false;
@@ -690,6 +725,7 @@ void loop() {
   if (apActive && apOffAt && now > apOffAt && staOK && !hotspotMode) { stopAP(); apOffAt = 0; }
   if (rebootSoon) { rebootSoon = false; rebootAt = now + 1500; }
   if (rebootLaterAt && (int32_t)(now - rebootLaterAt) >= 0) { rebootLaterAt = 0; rebootAt = now; }
+  if (sleepAt && (int32_t)(now - sleepAt) >= 0) { sleepAt = 0; goDeepSleep(); }
   if (rebootAt && now > rebootAt) { oledMsg("Restarting..."); delay(200); ESP.restart(); }
 
   handleButton();

@@ -153,6 +153,8 @@ bool handleThumbImportApi(AsyncWebServerRequest* r, const String& url, WebReques
 extern volatile int otaPercent;
 void ledBegin();   // led.cpp: plain ESP32 blue LED as a status light
 void ledWebUp();
+void ledOff();
+void comsSleep();   // coms.cpp: radios off before a deep sleep
 extern volatile char otaWhat;
 void handleUploadPart(AsyncWebServerRequest* r, const String& filename, size_t index, uint8_t* data, size_t len, bool final);
 void filesUploadDone(AsyncWebServerRequest* r);

@@ -107,6 +107,7 @@ if board != "V4":
             t = t.replace("Hold PRG for 6 seconds and let go to forget the Wi-Fi and go back to setup mode.",
                           "Hold BOOT for 6 seconds and let go to forget the home Wi-Fi and go back to its own Wi-Fi (named after the board, password theshelf) at http://10.1.1.250.")
             t = t.replace("Hold PRG", "Hold BOOT")
+            t = t.replace("PRG", "BOOT")                    # (deep sleep and any other mention of the button)
             t = t.replace("http://192.168.4.1", "http://10.1.1.250")   # its own Wi-Fi has a fixed address
             t = t.replace("const BAND_NAME = '900MHz Coms';", "const BAND_NAME = '2.4GHz Mesh Coms';")
         f.write_text(t, encoding="utf-8")

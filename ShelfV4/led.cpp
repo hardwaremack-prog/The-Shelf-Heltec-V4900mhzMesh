@@ -30,12 +30,20 @@ static void ledTask(void*) {
 }
 
 void ledBegin() {
+  gpio_hold_dis((gpio_num_t)LED_PIN);       // (held off through a deep sleep)
   ledcSetup(LED_CH, 5000, 8);
   ledcAttachPin(LED_PIN, LED_CH);
   xTaskCreatePinnedToCore(ledTask, "led", 2048, nullptr, 1, nullptr, 1);
 }
 void ledWebUp() { webUp = true; }
+void ledOff() {                             // deep sleep: dark, and held dark while asleep
+  ledcDetachPin(LED_PIN);
+  pinMode(LED_PIN, OUTPUT); digitalWrite(LED_PIN, LOW);
+  gpio_hold_en((gpio_num_t)LED_PIN);
+  gpio_deep_sleep_hold_en();
+}
 #else
+void ledOff() {}
 void ledBegin() {}
 void ledWebUp() {}
 #endif

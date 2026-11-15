@@ -712,6 +712,9 @@ static void comsTask(void*) {
   }
 }
 
+// Deep sleep (main.cpp): radios off first
+void comsSleep() { if (radioUp) radioStop(); if (nowUp) nowStop(); }
+
 void comsBegin() {
   comsLock = xSemaphoreCreateRecursiveMutex();
   cprefs.begin("coms", false);

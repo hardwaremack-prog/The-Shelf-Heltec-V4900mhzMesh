@@ -270,6 +270,7 @@ The same, with the module on the bottom side of the board (seen from underneath)
 Needs:
 - arduino-cli with **esp32 core 2.0.17**
 - **ESPAsyncWebServer 3.3.23** + **AsyncTCP 3.2.14** (mathieucarbou), **ArduinoJson 7**, **U8g2**
+- **RadioLib 7** (the V3/V4 LoRa radio; 7.1.2 works), and `ctags` (arduino-cli uses it for the .ino)
 - for the plain ESP32 build: **ESP32-A2DP 1.8** (pschatzmann) and **ESP8266Audio 1.9**
 - **mklittlefs 3.x** built with `LFS_NAME_MAX=64` to match the board. The copy bundled with the 2.0.x core breaks on paths over 32 characters (`make CPPFLAGS="-D LFS_NAME_MAX=64"`, or edit its Makefile)
 

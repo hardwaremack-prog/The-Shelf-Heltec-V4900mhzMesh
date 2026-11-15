@@ -385,6 +385,10 @@ static void playInfo(AsyncWebServerRequest* r) {
 // ------------------------------------------------------------ router
 // url: /api/files..., /api/categories, /api/upload, /api/play-info
 bool handleFilesApi(AsyncWebServerRequest* r, const String& url, WebRequestMethod m) {
+  // the version label under "Check for updates" and in About (The Shelf's app.js asks for this)
+  if (url == "/api/app/current" && m == HTTP_GET) {
+    sendJson(r, 200, "{\"version\":\"" FW_VERSION "\",\"build\":null,\"board\":\"" BOARD_NAME "\"}"); return true;
+  }
   if (url == "/api/categories" && m == HTTP_GET) {
     String s = "[";
     for (int i = 0; i < NUM_CATEGORIES; i++) { if (i) s += ","; s += String("{\"name\":\"") + CATEGORIES[i] + "\",\"count\":" + countCategory(CATEGORIES[i]) + "}"; }

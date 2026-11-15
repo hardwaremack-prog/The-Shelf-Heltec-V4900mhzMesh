@@ -7,7 +7,8 @@
 #include <algorithm>
 #include <memory>
 
-const char* const CATEGORIES[NUM_CATEGORIES] = {"Pictures", "Music", "MIDI", "Videos", "Games", "Programs", "Books"};
+// sidebar order, as on the computer: Books / PDFs at the top, Pictures at the bottom
+const char* const CATEGORIES[NUM_CATEGORIES] = {"Books", "Music", "MIDI", "Videos", "Games", "Programs", "Pictures"};
 bool isCategory(const String& c) { for (auto x : CATEGORIES) if (c == x) return true; return false; }
 
 SpiRamAllocator psAlloc;

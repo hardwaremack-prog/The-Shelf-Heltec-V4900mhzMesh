@@ -686,3 +686,44 @@
     return res;
   };
 })();
+
+// ---- Check for updates, the board's way ----
+// The computer's Shelf updates itself straight from GitHub. A board gets its updates from the
+// installer site (the same files its /update page uses): this checks there for newer firmware,
+// and "Update now" opens the board's update page, which downloads and installs it.
+(function () {
+  const BASE = 'https://hardwaremack-prog.github.io/The-Shelf-Heltec-V4900mhzMesh/';
+  const newer = (a, b) => { a = String(a).split('.').map(Number); b = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) { if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) > (b[i] || 0); } return false; };
+  window.checkShelfUpdate = checkShelfUpdate = async function () {
+    const box = document.getElementById('shelfUpdateBox');
+    if (!box) return;
+    box.hidden = false;
+    const msg = document.getElementById('shelfUpdateMsg'), btn = document.getElementById('shelfUpdateBtn');
+    msg.textContent = 'Checking for newer firmware…'; btn.hidden = true;
+    let info;
+    try { info = await fetch('/api/board/update/info', { cache: 'no-store' }).then(r => r.json()); }
+    catch { msg.textContent = "Couldn't ask the board which version it's running."; return; }
+    try {
+      const latest = await fetch(BASE + 'ota/' + info.id + '.json', { cache: 'no-store' }).then(r => { if (!r.ok) throw new Error(r.status); return r.json(); });
+      if (newer(latest.version, info.fw)) {
+        msg.textContent = `v${latest.version} is ready to install. This board has v${info.fw}.`;
+        btn.hidden = false; btn.disabled = false;
+      } else {
+        msg.textContent = `Up to date (v${info.fw}).`;
+      }
+    } catch {
+      msg.textContent = `This board has v${info.fw}. Couldn't reach the internet from this browser to check for a newer one. On the board's own Wi-Fi, use its update page with a file instead.`;
+      btn.hidden = false; btn.disabled = false; btn.textContent = 'Open the update page';
+    }
+  };
+  function hook() {
+    const old = document.getElementById('shelfUpdateBtn');
+    if (!old) return;
+    const btn = old.cloneNode(true);   // drops The Shelf's own handler (it updates a computer)
+    old.replaceWith(btn);
+    btn.addEventListener('click', () => { location.href = '/update'; });
+    const side = document.getElementById('sidebarUpdateBtn');
+    if (side) side.title = 'Check for newer firmware for this board';
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', hook); else hook();
+})();

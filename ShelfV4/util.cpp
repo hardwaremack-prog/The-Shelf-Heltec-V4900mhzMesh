@@ -448,7 +448,7 @@ struct StreamGuard {
 };
 static bool lowMem() { return ESP.getPsramSize() == 0; }
 
-void sendFileRanged(AsyncWebServerRequest* r, const String& p, bool download) {
+void sendFileRanged(AsyncWebServerRequest* r, const String& p, bool download, bool immutable) {
   File f = store->open(p, FILE_READ);
   if (!f || f.isDirectory()) { if (f) f.close(); r->send(404, "text/plain", "Not found"); return; }
   size_t size = f.size();
@@ -500,7 +500,8 @@ void sendFileRanged(AsyncWebServerRequest* r, const String& p, bool download) {
       return got > 0 ? (size_t)got : 0;
     });
   res->addHeader("Accept-Ranges", "bytes");
-  res->addHeader("Cache-Control", "no-cache");
+  // a versioned picture (?v=...) never changes under the same link: keep it (no reloading every visit)
+  res->addHeader("Cache-Control", immutable ? "public, max-age=31536000, immutable" : "no-cache");
   if (ranged) { res->setCode(206); res->addHeader("Content-Range", String("bytes ") + start + "-" + end + "/" + size); }
   if (download) {
     String n = p.substring(p.lastIndexOf('/') + 1); n.replace("\"", "'");

@@ -90,7 +90,7 @@ static bool readId3(const String& path, String& artist, String& title, const Str
           uint32_t left = sz - i; uint8_t cb[2048]; bool ok = true;
           while (left) { int k = f.read(cb, std::min<uint32_t>(left, sizeof cb)); if (k <= 0 || out.write(cb, k) != (size_t)k) { ok = false; break; } left -= k; }
           out.close();
-          if (ok) gotArt = true; else store->remove(artOut);
+          if (ok) gotArt = true; else store->remove(artOut);   // (only ever a song with no art yet: no link changes)
         }
       }
       f.seek(start + sz);

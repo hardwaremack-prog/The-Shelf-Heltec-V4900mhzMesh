@@ -87,6 +87,7 @@ static void importShelf(const char* cat) {
 static void importTask(void*) {
   for (int i = 0; CATS[i] && !errorMsg[0]; i++) importShelf(CATS[i]);
   setStatus(errorMsg[0] ? "" : "Done");
+  if (copied) bumpArtGen();
   running = false;
   vTaskDelete(nullptr);
 }

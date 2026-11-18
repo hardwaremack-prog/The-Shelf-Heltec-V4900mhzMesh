@@ -125,7 +125,11 @@ struct StrOut : public Print {
 };
 void sendErr(AsyncWebServerRequest* r, int code, const String& msg);
 void sendDoc(AsyncWebServerRequest* r, JsonDocument& doc, int code = 200);
-void sendFileRanged(AsyncWebServerRequest* r, const String& path, bool download = false);
+void sendFileRanged(AsyncWebServerRequest* r, const String& path, bool download = false, bool immutable = false);
+// Album art and thumbnails: their links carry this number, which changes whenever any of them
+// changes, so browsers can keep the pictures for good and still see a new one (api_files.cpp).
+uint32_t artGen();
+void bumpArtGen();
 void sendJsonFile(AsyncWebServerRequest* r, const String& path);
 // Streams "[" a "," b "," ... "]" from files; each file optionally gets its final
 // byte replaced by `tails[i]` (used to add "read":true to chat messages).

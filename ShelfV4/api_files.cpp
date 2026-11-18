@@ -12,6 +12,10 @@ static const char* PLAYS_FILE = DATA_ROOT "/play-counts.json";
 static const char* META_FILE  = DATA_ROOT "/music-meta.json";
 
 static String catDir(const String& cat) { return "/" + cat; }
+
+static uint32_t gen = 0;
+uint32_t artGen() { if (!gen) gen = esp_random() | 1; return gen; }   // fresh after a restart
+void bumpArtGen() { gen = artGen() + 1; }
 static String thumbPath(const char* kind, const String& cat, const String& name) {
   return String(DATA_ROOT "/") + kind + "/" + fnvHex(cat + "/" + name) + ".jpg";
 }
@@ -60,6 +64,7 @@ static void migrateExtras(const String& fc, const String& fn, const String& tc, 
     String a = thumbPath(kind, fc, fn);
     if (!store->exists(a)) continue;
     if (tc.length()) moveFile(a, thumbPath(kind, tc, tn)); else store->remove(a);
+    bumpArtGen();
   }
   String cache = String(PLAY_ROOT "/") + md5hex(fc + "/" + fn);
   if (store->exists(cache)) removeAll(cache);
@@ -102,7 +107,7 @@ static void entryJson(ListState& s, const DirEnt& e, String& o) {
               jsonEsc(url).c_str(), pc);
   if (cat == "Music") {
     String art = thumbPath("album-art", cat, e.name);
-    if (hasHash(s.haveArt, art.substring(art.lastIndexOf('/') + 1))) out->printf(",\"artUrl\":\"/data-files/album-art/%s?v=%llu\"", art.substring(art.lastIndexOf('/') + 1).c_str(), (unsigned long long)e.mtimeMs);
+    if (hasHash(s.haveArt, art.substring(art.lastIndexOf('/') + 1))) out->printf(",\"artUrl\":\"/data-files/album-art/%s?v=%llx-%x\"", art.substring(art.lastIndexOf('/') + 1).c_str(), (unsigned long long)e.mtimeMs, artGen());
     else out->print(",\"artUrl\":null");
     const char* a = s.meta[e.name]["a"] | (const char*)nullptr;
     if (a && *a) out->printf(",\"artist\":\"%s\"", jsonEsc(a).c_str()); else out->print(",\"artist\":null");
@@ -110,7 +115,7 @@ static void entryJson(ListState& s, const DirEnt& e, String& o) {
   if (cat == "Videos" || thumbable(cat)) {
     const char* kind = cat == "Videos" ? "video-thumbs" : "file-thumbs";
     String t = thumbPath(kind, cat, e.name);
-    if (hasHash(s.haveThumb, t.substring(t.lastIndexOf('/') + 1))) out->printf(",\"thumbUrl\":\"/data-files/%s/%s?v=%llu\"", kind, t.substring(t.lastIndexOf('/') + 1).c_str(), (unsigned long long)nowMs() / 60000);
+    if (hasHash(s.haveThumb, t.substring(t.lastIndexOf('/') + 1))) out->printf(",\"thumbUrl\":\"/data-files/%s/%s?v=%llx-%x\"", kind, t.substring(t.lastIndexOf('/') + 1).c_str(), (unsigned long long)e.mtimeMs, artGen());
     else out->print(",\"thumbUrl\":null");
   }
   out->print("}");
@@ -426,6 +431,7 @@ bool handleFilesApi(AsyncWebServerRequest* r, const String& url, WebRequestMetho
   if (!isCategory(cat)) { sendErr(r, 400, "Invalid category"); return true; }
 
   // whole-shelf actions
+  if ((tail == "video-thumbs" || tail == "file-thumbs") && m == HTTP_DELETE) bumpArtGen();
   if (tail == "video-thumbs" && m == HTTP_DELETE && cat == "Videos") {
     int n = 0; File d = store->open(DATA_ROOT "/video-thumbs");
     std::vector<String> v; if (d) { File c = d.openNextFile(); while (c) { v.push_back(c.path()); c.close(); c = d.openNextFile(); } d.close(); }
@@ -440,6 +446,7 @@ bool handleFilesApi(AsyncWebServerRequest* r, const String& url, WebRequestMetho
     sendJson(r, 200, String("{\"cleared\":") + n + "}"); return true;
   }
   if (tail == "album-art" && m == HTTP_DELETE) {
+    bumpArtGen();
     sendErr(r, 501, "Album art comes from your songs' own tags on the board, so there's nothing to clear."); return true;
   }
   if (tail == "fetch-album-art" || tail == "remove-duplicates" || tail == "standardize-names" || tail == "export" || tail == "download-all") {
@@ -513,7 +520,7 @@ bool handleFilesApi(AsyncWebServerRequest* r, const String& url, WebRequestMetho
     const char* kind = video ? "video-thumbs" : music ? "album-art" : "file-thumbs";
     String tp = thumbPath(kind, cat, safe);
     if (m == HTTP_DELETE) {
-      bool had = store->exists(tp); if (had) store->remove(tp);
+      bool had = store->exists(tp); if (had) { store->remove(tp); bumpArtGen(); }
       sendJson(r, 200, String("{\"removed\":") + (had ? "true" : "false") + "}"); return true;
     }
     if (m == HTTP_POST) {
@@ -522,6 +529,7 @@ bool handleFilesApi(AsyncWebServerRequest* r, const String& url, WebRequestMetho
       String tmp = tp + ".part";
       if (!bodyDataUrlToFile(r, "imageData", tmp, 10u * 1024 * 1024)) { sendErr(r, 400, "Invalid image data"); return true; }
       moveFile(tmp, tp);
+      bumpArtGen();
       sendJson(r, 200, String("{\"saved\":true,\"thumbUrl\":\"/data-files/") + kind + "/" + tp.substring(tp.lastIndexOf('/') + 1) + "?v=" + (uint32_t)(nowMs() / 1000) + "\"}");
       return true;
     }
@@ -569,7 +577,7 @@ bool serveContent(AsyncWebServerRequest* r, const String& url) {
     if (!okDir || file.indexOf('/') >= 0 || file.startsWith(".") || extOf(file) == "svg" || (k != "image" && k != "video" && k != "audio")) {
       r->send(404, "text/plain", "Not found"); return true;
     }
-    sendFileRanged(r, String(DATA_ROOT "/") + dir + "/" + file);
+    sendFileRanged(r, String(DATA_ROOT "/") + dir + "/" + file, false, r->hasParam("v"));
     return true;
   }
   return false;

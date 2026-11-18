@@ -65,8 +65,7 @@ static void drawNowPage(uint32_t el) {
   oled.setFont(u8g2_font_5x7_tf);
   // a little music note
   oled.drawDisc(3, 7, 2); oled.drawVLine(5, 0, 8); oled.drawLine(5, 0, 9, 2);
-  oled.drawStr(13, 7, "NOW PLAYING");
-  if (staOK || apActive) { String h = hostName; oled.drawStr(128 - oled.getStrWidth(h.c_str()), 7, h.c_str()); }
+  oled.drawStr(13, 7, "NOW PLAYING");               // (the board's name used to sit to the right and ran into it)
   oled.drawHLine(0, 10, 128);
   char name[96]; snprintf(name, sizeof name, "%s", npName);
   oled.setFont(u8g2_font_helvB12_tf);

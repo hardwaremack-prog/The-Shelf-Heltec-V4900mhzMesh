@@ -52,6 +52,8 @@ static SPIClass sdSPI(FSPI);
 #endif
 static U8G2_SSD1306_128X64_NONAME_F_HW_I2C oled(U8G2_R0, OLED_RST, OLED_SCL, OLED_SDA);
 static bool oledOK = false, screenOn = true;
+static bool scrAutoSleep = false;                   // false: the screen stays on, cycling clock and info pages
+static int tzMin = 0;                               // the browser's time zone, minutes east of UTC
 static void oledPower(int save) { if (oledOK) oled.setPowerSave(save); }
 static uint32_t lastActivity = 0;
 static int onlineShelves = 0;
@@ -185,10 +187,7 @@ static void drawLine(int y, const String& t) {
   oled.drawStr(span - off, y, t.c_str());
 }
 
-static void drawStatus() {
-  scrolling = false;
-  if (!oledOK || !screenOn) return;
-  oled.clearBuffer();
+static void drawStatusPage() {
   // top bar: name, storage, battery
   oled.setFont(u8g2_font_helvB08_tf); oled.drawStr(0, 9, "THE SHELF");
   int x = oled.getStrWidth("THE SHELF") + 3;
@@ -251,8 +250,8 @@ static void drawStatus() {
   }
   oled.setFont(u8g2_font_6x10_tf);
   oled.drawStr(0, 62, bottom.c_str());
-  oled.sendBuffer();
 }
+#include "screen_pages.h"
 
 // ------------------------------------------------------------ storage
 static void setupStorage() {
@@ -415,7 +414,7 @@ bool handleBoardApi(AsyncWebServerRequest* r, const String& url, WebRequestMetho
       "\",\"ip\":\"" + currentIP() + "\",\"ssid\":\"" + jsonEsc(staOK ? WiFi.SSID() : String("")) + "\",\"rssi\":" + (staOK ? WiFi.RSSI() : 0) +
       ",\"ap\":" + (apActive ? "true" : "false") + ",\"apName\":\"" + jsonEsc(ownSSID) + "\",\"hotspot\":" + (hotspotMode ? "true" : "false") +
       ",\"setup\":" + (firstSetup ? "true" : "false") + ",\"homeSsid\":\"" + jsonEsc(wifiSSID) + "\",\"apOpen\":" + (ownPass.length() >= 8 ? "false" : "true") + ",\"apPass\":\"" + jsonEsc(ownPass) + "\"" +
-      ",\"clients\":" + (apActive ? WiFi.softAPgetStationNum() : 0) + ",\"timeSet\":" + (time(nullptr) > 1700000000 ? "true" : "false") +
+      ",\"clients\":" + (apActive ? WiFi.softAPgetStationNum() : 0) + ",\"timeSet\":" + (time(nullptr) > 1700000000 ? "true" : "false") + ",\"tz\":" + tzMin + ",\"scrSleep\":" + (scrAutoSleep ? "true" : "false") +
       ",\"uptime\":" + (millis() / 1000) +
       ",\"sdPins\":\"" SD_PINS "\",\"sdRetries\":" + String(sdRetries) + ",\"sdFailures\":" + String(sdFailures) + ",\"heap\":" + ESP.getFreeHeap() + ",\"psram\":" + ESP.getPsramSize() + "}";
     sendJson(r, 200, s); return true;
@@ -457,7 +456,13 @@ bool handleBoardApi(AsyncWebServerRequest* r, const String& url, WebRequestMetho
       struct timeval tv = {(time_t)(ms / 1000), (suseconds_t)((ms % 1000) * 1000)};
       settimeofday(&tv, nullptr);
     }
+    int tz = b["tz"] | 9999;
+    if (tz >= -14 * 60 && tz <= 14 * 60 && tz != tzMin) { tzMin = tz; prefs.putInt("tz", tz); }
     sendJson(r, 200, String("{\"ok\":true,\"timeSet\":") + (time(nullptr) > 1700000000 ? "true" : "false") + "}"); return true;
+  }
+  if (url == "/api/board/screen") {           // {sleep:true}: the screen sleeps after 5 minutes; false: stays on
+    scrAutoSleep = b["sleep"] | false; prefs.putBool("scrsleep", scrAutoSleep); screenWake();
+    sendJson(r, 200, String("{\"ok\":true,\"scrSleep\":") + (scrAutoSleep ? "true" : "false") + "}"); return true;
   }
   if (url == "/api/board/settings") {
     String h = sanitizeHost(b["host"] | "");
@@ -605,7 +610,7 @@ static void setupServer(AsyncWebServer& s) {
 }
 
 // ------------------------------------------------------------ button
-// short press: wake the screen (it sleeps after 5 minutes).
+// short press: wake the screen, or when it's on, show the next page.
 // hold 6 s, then let go: forget Wi-Fi.  keep holding to 12 s: clear the admin password.
 static uint32_t btnDownAt = 0; static bool btnDown = false;
 static void handleButton() {
@@ -636,7 +641,7 @@ static void handleButton() {
 #endif
       delay(1200); ESP.restart();
     }
-    if (held < 800 && !screenOn) { screenOn = true; oledPower(0); }
+    if (held < 800) { if (!screenOn) { screenOn = true; oledPower(0); } else nextPageNow = true; }
   }
 }
 
@@ -709,6 +714,8 @@ void setup() {
   // it's been renamed to), so every board on the air is its own network.
   ownSSID = hostName;
   ownPass = prefs.getString("appass", AP_PASS);
+  tzMin = prefs.getInt("tz", 0);
+  scrAutoSleep = prefs.getBool("scrsleep", false);
   firstSetup = !hotspotMode && !wifiSSID.length();
   adminBegin();
 
@@ -764,7 +771,7 @@ void loop() {
   if (now - lastHeapLog > 15000) { lastHeapLog = now; Serial.printf("[shelf] heap free %u, largest block %u, lowest %u\n", ESP.getFreeHeap(), ESP.getMaxAllocHeap(), ESP.getMinFreeHeap()); }
 #endif
 
-  if (screenOn && now - lastActivity > 300000 && !btnDown) { screenOn = false; oledPower(1); }
+  if (scrAutoSleep && screenOn && now - lastActivity > 300000 && !btnDown && !nowPlayingFresh()) { screenOn = false; oledPower(1); }
   static uint32_t lastDraw = 0;
   static uint32_t lastBatt = 0;
   if (lastBatt == 0 || now - lastBatt > 10000) { readBattery(); lastBatt = now; }
@@ -774,6 +781,6 @@ void loop() {
       char b[24]; snprintf(b, sizeof b, "%s %d%%", otaWhat == 'w' ? "Web app" : "Firmware", otaPercent);
       oledMsg("UPDATING", b, "Don't unplug"); otaShown = otaPercent; lastDraw = now;
     }
-  } else if (!btnDown && now - lastDraw > (scrolling ? 200u : 1000u)) { otaShown = -1; onlineShelves = onlinePeerCount(); drawStatus(); lastDraw = now; }
+  } else if (!btnDown && now - lastDraw > (scrolling ? 80u : 1000u)) { otaShown = -1; onlineShelves = onlinePeerCount(); drawScreen(); lastDraw = now; }
   delay(5);
 }

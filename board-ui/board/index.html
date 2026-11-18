@@ -147,8 +147,14 @@ label.l{font-size:13px;color:var(--muted)}
   </select><button class="pri" onclick="deepSleep()">Deep sleep</button></div>
   <div class="msg" id="sleepMsg"></div>
 
+  <h2>Screen</h2>
+  <p class="tip">When it stays on, the screen takes turns showing the board's address, a watch face, the time, today's affirmation, the color of the day, the CPU temperature and the song that's playing. Press PRG to skip to the next one.</p>
+  <div class="btns"><select id="scrMode" style="flex:1;min-width:160px" onchange="setScreen()">
+    <option value="on">Stays on</option><option value="sleep">Sleeps after 5 minutes (PRG wakes it)</option>
+  </select></div>
+  <div class="msg" id="scrMsg"></div>
+
   <div class="btns" style="margin-top:24px"><button onclick="reboot()">Restart the board</button></div>
-  <p class="tip">The screen sleeps after 5 minutes. Press the board's PRG button to wake it.</p>
   <p class="tip">Hold PRG for 6 seconds and let go to forget the Wi-Fi and go back to setup mode. Keep holding to 12 seconds to clear a forgotten admin password and turn read-only off.</p>
 </div>
 <script>
@@ -206,7 +212,8 @@ async function load(){try{I=await fetch('/api/board/info').then(r=>r.json())}cat
   if(!tabPicked)showTab(I.hotspot?'own':'home');
   if(!pwFilled){$('#apSsid').value=I.apName;$('#apPass').value=I.apPass||'';pwFilled=true}
   $('#backHome').style.display=I.hotspot&&I.homeSsid?'inline-block':'none';$('#homeName').textContent=I.homeSsid;
-  if(!I.timeSet)post('/api/board/time',{ms:Date.now()}).catch(()=>{});
+  {const tz=-new Date().getTimezoneOffset();if(!I.timeSet||I.tz!==tz)post('/api/board/time',{ms:Date.now(),tz}).catch(()=>{})}
+  if(document.activeElement!==$('#scrMode'))$('#scrMode').value=I.scrSleep?'sleep':'on';
   if(document.activeElement!==$('#host'))$('#host').value=I.host;
   $('#hostShow').textContent='http://'+I.host+'.local';
   $('#storeTip').innerHTML=I.storage==='microSD card'
@@ -225,6 +232,7 @@ async function saveHost(){try{const j=await post('/api/board/settings',{host:$('
 async function deepSleep(){const m=+$('#sleepFor').value;
   if(!confirm('Put the board into deep sleep'+(m?' for '+(m>=60?m/60+' hour'+(m>60?'s':''):m+' min'):'')+'? It stops answering until it wakes (press PRG to wake it sooner).'))return;
   try{await post('/api/board/sleep',{minutes:m});$('#sleepMsg').textContent='Going to sleep… press PRG to wake it'+(m?', or it wakes by itself.':'.')}catch(e){$('#sleepMsg').textContent=e.message;$('#sleepMsg').className='msg err'}}
+async function setScreen(){try{await post('/api/board/screen',{sleep:$('#scrMode').value==='sleep'});$('#scrMsg').textContent='Saved.'}catch(e){$('#scrMsg').textContent=e.message;$('#scrMsg').className='msg err'}}
 async function reboot(){if(!confirm('Restart the board?'))return;await post('/api/board/reboot');$('#wMsg').textContent='Restarting… give it 15 seconds.'}
 // ---- microSD backup / restore ----
 let cardBusy=false;

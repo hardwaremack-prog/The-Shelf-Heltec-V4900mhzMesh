@@ -27,6 +27,7 @@ if [ ! -f "$SHELF/public/app.js" ]; then
   SHELF=build/the-shelf
 fi
 mkdir -p build docs/firmware
+python3 tools/gen_daily.py "$SHELF" ShelfV4/daily_gen.h   # the daily affirmation and color for the screen
 python3 tools/pack_www.py "$SHELF" build/www-v4.bin 0x200000 V4
 python3 tools/pack_www.py "$SHELF" build/www-v3.bin 0x200000 V3
 python3 tools/pack_www.py "$SHELF" build/www-esp32.bin 0x130000 ESP32

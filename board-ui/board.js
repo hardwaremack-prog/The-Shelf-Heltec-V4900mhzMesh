@@ -7,7 +7,9 @@
   async function decorate() {
     const info = await boardInfo();
     // On its own Wi-Fi the board has no internet clock: lend it this device's time.
-    if (info && !info.timeSet) fetch('/api/board/time', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ms: Date.now() }) }).catch(() => {});
+    // the board has no clock of its own on its own Wi-Fi, and doesn't know your time zone: tell it (for its screen)
+    const tz = -new Date().getTimezoneOffset();
+    if (info && (!info.timeSet || info.tz !== tz)) fetch('/api/board/time', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ms: Date.now(), tz }) }).catch(() => {});
     const p = document.querySelector('.brand-text p');
     if (p) p.textContent = 'running on a Heltec V4';
     const net = document.getElementById('networkUrl');

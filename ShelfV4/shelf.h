@@ -202,7 +202,7 @@ String remoteStatusJson();
 bool remoteBoardCommand(uint8_t cmd, const String& arg, String& out);
 int batteryPercentNow();
 void screenWake();
-void screenNowPlaying(const String& file);   // a song started: show its name on the screen
+void screenShowing(const String& cat, const String& file);   // something opened from a shelf: show its name on the screen
 void screenSleep();
 bool screenIsOn();
 

@@ -492,7 +492,7 @@ bool handleFilesApi(AsyncWebServerRequest* r, const String& url, WebRequestMetho
   if (action == "play" && m == HTTP_POST) {
     if (!store->exists(path)) { sendErr(r, 404, "File not found"); return true; }
     sendJson(r, 200, String("{\"plays\":") + bumpPlay(cat, safe) + "}");
-    if (cat == "Music" || cat == "MIDI") screenNowPlaying(safe);
+    screenShowing(cat, safe);                       // the screen shows what was opened
     return true;
   }
   if (action == "edit" && m == HTTP_POST) {

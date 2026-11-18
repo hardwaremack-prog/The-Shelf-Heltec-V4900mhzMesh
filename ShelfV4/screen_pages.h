@@ -12,7 +12,9 @@ static int page = P_STATUS;
 static uint32_t pageAt = 0, pageLen = 10000;
 static volatile bool nextPageNow = false;
 static char npName[96] = "";
-static volatile uint32_t npAt = 0;                 // when the last song started (0: none)
+static char npLabel[20] = "NOW PLAYING";
+static volatile bool npMusic = true;               // a song (the bars bounce) or a game, program, video, picture
+static volatile uint32_t npAt = 0;                 // when it started (0: nothing yet)
 
 static bool clockOK() { return time(nullptr) > 1700000000; }
 static void localNow(struct tm* t) { time_t n = time(nullptr) + (time_t)tzMin * 60; gmtime_r(&n, t); }
@@ -21,13 +23,23 @@ static uint32_t dayNumber() { return (uint32_t)(time(nullptr) / 86400); }   // s
 static bool nowPlayingFresh() { return npAt && millis() - npAt < 30000; }
 static bool nowPlayingRecent() { return npAt && millis() - npAt < 600000; }
 
-// Called by the web server when a song starts (any task): remember its name and show it.
-void screenNowPlaying(const String& file) {
+// Called by the web server (any task) when something is opened from a shelf: a song, a game,
+// a program, a video or a picture. Shows its name for 30 seconds, then keeps it in the rotation.
+void screenShowing(const String& cat, const String& file) {
+  bool music = cat == "Music" || cat == "MIDI";
+  const char* label = music ? "NOW PLAYING" : cat == "Games" ? "PLAYING GAME" : cat == "Programs" ? "PROGRAM"
+                    : cat == "Videos" ? "WATCHING" : cat == "Pictures" ? "PICTURE" : cat == "Books" ? "READING" : nullptr;
+  if (!label) return;
   String n = file;
-  int dot = n.lastIndexOf('.');
-  if (dot > 0) n.remove(dot);
-  n.replace('_', ' ');
+  if (music) {                                      // songs: just the title
+    int dot = n.lastIndexOf('.');
+    if (dot > 0) n.remove(dot);
+    n.replace('_', ' ');
+  }
+  npAt = 0;                                         // (the screen task skips it while it's being changed)
   snprintf(npName, sizeof npName, "%s", n.c_str());
+  snprintf(npLabel, sizeof npLabel, "%s", label);
+  npMusic = music;
   npAt = millis() | 1;
   screenWake();
 }
@@ -62,21 +74,29 @@ static const char* const MON[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul
 
 // ---- pages
 static void drawNowPage(uint32_t el) {
+  char name[96], label[20];
+  snprintf(name, sizeof name, "%s", npName); snprintf(label, sizeof label, "%s", npLabel);
+  bool music = npMusic;
   oled.setFont(u8g2_font_5x7_tf);
-  // a little music note
-  oled.drawDisc(3, 7, 2); oled.drawVLine(5, 0, 8); oled.drawLine(5, 0, 9, 2);
-  oled.drawStr(13, 7, "NOW PLAYING");               // (the board's name used to sit to the right and ran into it)
+  int lw = oled.getStrWidth(label), lx = (128 - lw) / 2;
+  if (music) { lx = 13; oled.drawDisc(3, 7, 2); oled.drawVLine(5, 0, 8); oled.drawLine(5, 0, 9, 2); }   // a music note
+  oled.drawStr(lx, 7, label);
   oled.drawHLine(0, 10, 128);
-  char name[96]; snprintf(name, sizeof name, "%s", npName);
   oled.setFont(u8g2_font_helvB12_tf);
   drawLoop(34, name, el);
-  // bouncing bars
-  scrolling = true;
-  uint32_t f = millis() / 110;
-  for (int i = 0; i < 16; i++) {
-    uint32_t h = (f * 2654435761u + i * 40503u) ^ (f >> 3) * 977u;
-    int bh = 2 + (int)((h >> 7) % 15);
-    oled.drawBox(i * 8 + 1, 64 - bh, 6, bh);
+  if (music) {                                      // bouncing bars along the bottom
+    scrolling = true;
+    uint32_t f = millis() / 110;
+    for (int i = 0; i < 16; i++) {
+      uint32_t h = (f * 2654435761u + i * 40503u) ^ (f >> 3) * 977u;
+      int bh = 2 + (int)((h >> 7) % 15);
+      oled.drawBox(i * 8 + 1, 64 - bh, 6, bh);
+    }
+  } else {                                          // which shelf, along the bottom
+    const char* shelf = !strcmp(label, "PLAYING GAME") ? "from the Games shelf" : !strcmp(label, "PROGRAM") ? "from the Programs shelf"
+                      : !strcmp(label, "WATCHING") ? "from the Videos shelf" : !strcmp(label, "PICTURE") ? "from the Pictures shelf" : "from the Books shelf";
+    oled.setFont(u8g2_font_5x7_tf);
+    oled.drawStr((128 - oled.getStrWidth(shelf)) / 2, 61, shelf);
   }
 }
 
@@ -210,7 +230,7 @@ static void drawTempPage() {
 // ---- the carousel
 static bool pageReady(int p) {
   switch (p) {
-    case P_NOW: return nowPlayingRecent() && npName[0];
+    case P_NOW: return nowPlayingRecent() && npName[0];   // a song, game, program, video or picture
     case P_WATCH: case P_CLOCK: case P_AFFIRM: case P_COLOR: return clockOK();
     default: return true;
   }

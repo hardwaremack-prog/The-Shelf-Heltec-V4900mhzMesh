@@ -729,3 +729,21 @@
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', hook); else hook();
 })();
+
+// ---- The board's screen shows the picture on show ----
+// Songs, games, programs and videos tell the board through their play count; pictures in the
+// slideshow don't have one, so each slide's name is passed on here (only pictures from the
+// Pictures shelf, not the album-covers slideshow).
+(function () {
+  if (typeof showSlide !== 'function') return;
+  const real = showSlide;
+  window.showSlide = showSlide = function () {
+    real.apply(this, arguments);
+    try {
+      if (state.slideshow.list) return;
+      const f = slideList()[state.slideshow.index];
+      if (!f) return;
+      fetch('/api/board/showing', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cat: 'Pictures', name: f.name }) }).catch(() => {});
+    } catch (e) {}
+  };
+})();

@@ -52,7 +52,7 @@ static SPIClass sdSPI(FSPI);
 #endif
 static U8G2_SSD1306_128X64_NONAME_F_HW_I2C oled(U8G2_R0, OLED_RST, OLED_SCL, OLED_SDA);
 static bool oledOK = false, screenOn = true;
-static bool scrAutoSleep = false;                   // false: the screen stays on, cycling clock and info pages
+static bool scrAutoSleep = true;                    // sleeps after 5 minutes; false: stays on, cycling clock and info pages
 static int tzMin = 0;                               // the browser's time zone, minutes east of UTC
 static void oledPower(int save) { if (oledOK) oled.setPowerSave(save); }
 static uint32_t lastActivity = 0;
@@ -231,7 +231,10 @@ static void drawStatusPage() {
   oled.setFont(u8g2_font_6x10_tf);
   String bottom;
   if (staOK) {
-    oled.drawStr(0, 24, (hostName + ".local").c_str());
+    String h = hostName + ".local";                 // a long name: smaller letters, so it all fits
+    if (oled.getStrWidth(h.c_str()) > 128) oled.setFont(u8g2_font_5x7_tf);
+    oled.drawStr(0, 24, h.c_str());
+    oled.setFont(u8g2_font_6x10_tf);
     String l2 = onlineShelves > 0 ? String(onlineShelves) + (onlineShelves == 1 ? " Shelf nearby" : " Shelves nearby")
                                   : String("Wi-Fi ") + WiFi.RSSI() + " dBm";
     if (comsLastAt && millis() - comsLastAt < 15000) l2 = comsLastLine;
@@ -489,6 +492,11 @@ bool handleBoardApi(AsyncWebServerRequest* r, const String& url, WebRequestMetho
     if (tz >= -14 * 60 && tz <= 14 * 60 && tz != tzMin) { tzMin = tz; prefs.putInt("tz", tz); }
     sendJson(r, 200, String("{\"ok\":true,\"timeSet\":") + (time(nullptr) > 1700000000 ? "true" : "false") + "}"); return true;
   }
+  if (url == "/api/board/showing") {          // {cat, name}: a picture is on screen in the slideshow
+    String cat = b["cat"] | "", name = b["name"] | "";
+    if (cat == "Pictures" && name.length() && name.length() < 120 && name.indexOf('/') < 0) screenShowing(cat, name);
+    sendJson(r, 200, "{\"ok\":true}"); return true;
+  }
   if (url == "/api/board/screen") {           // {sleep:true}: the screen sleeps after 5 minutes; false: stays on
     scrAutoSleep = b["sleep"] | false; prefs.putBool("scrsleep", scrAutoSleep); screenWake();
     sendJson(r, 200, String("{\"ok\":true,\"scrSleep\":") + (scrAutoSleep ? "true" : "false") + "}"); return true;
@@ -744,7 +752,7 @@ void setup() {
   ownSSID = hostName;
   ownPass = prefs.getString("appass", AP_PASS);
   tzMin = prefs.getInt("tz", 0);
-  scrAutoSleep = prefs.getBool("scrsleep", false);
+  scrAutoSleep = prefs.getBool("scrsleep", true);
   firstSetup = !hotspotMode && !wifiSSID.length();
   adminBegin();
 

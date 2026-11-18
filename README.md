@@ -188,11 +188,25 @@ If the board is set to join your home Wi-Fi but can't find it at power-up, it st
 - **Storage bar** with free space
 - **Bottom line:** the **IP address** to open
 
-The screen goes dark after 5 minutes, even with The Shelf open in a browser. A short press of **PRG** wakes it, and so does **Wake** from a remote board over Coms.
+#### Screen pages (v1.12 and later)
+
+While it's on, the screen takes turns through these pages, about 6 to 10 seconds each (long text scrolls by once):
+
+![The screen's pages: status, now playing, a game opened, a picture on show, watch face, clock, today's affirmation, color of the day, CPU temperature](docs/screens/all-screens.png)
+
+*Drawn by the firmware's own screen code with the real U8g2 library and fonts (`tools/screen-sim/render.sh`), shown on a two-color screen plugged in line on an ESP32: the bottom strip is yellow.*
+
+- **Status:** as above. On a screen plugged in line, little arrows point at the **BOOT** (next page) and **EN** (restart) buttons beside it.
+- **Now playing / Playing game / Program / Watching / Picture / Reading:** whatever was just opened on the board: a song, a game, a program, a video, a picture in the slideshow, or a book. It takes over the screen for 30 seconds (wakes it, too), with the name scrolling, then stays in the rotation for 10 minutes.
+- **Watch face** with a sweeping second hand and the date, and a big **clock**. These need the time: from the internet, or from the first browser that opens The Shelf, which also tells the board its time zone.
+- **Today's affirmation** and the **color of the day**: the same ones The Shelf's Home page shows that day.
+- **CPU temperature** in °C and °F, how long the board has been on, and free memory.
+
+**Screen sleep:** by default the screen goes dark after 5 minutes (a song, game or picture opening restarts that). A short press of **PRG** (BOOT on an ESP32) wakes it, and so does **Wake** from a remote board over Coms. To keep it on all the time, set **Screen** to **Stays on** on the board's settings page. While it's on, a short press shows the next page.
 
 The **Heltec V4** card at the bottom of The Shelf's sidebar opens the board's settings page (`/board/`). There you can change Wi-Fi, rename the board, see storage, and restart it. There's also the admin password and read-only switch.
 
-**PRG button:** a short press wakes the screen. Hold it 6 seconds and let go to forget the Wi-Fi and go back to setup mode. Keep holding to 12 seconds to clear the admin password and turn read-only off.
+**PRG button:** a short press wakes the screen, or shows the next page. Hold it 6 seconds and let go to forget the Wi-Fi and go back to setup mode. Keep holding to 12 seconds to clear the admin password and turn read-only off.
 
 ## More screenshots
 

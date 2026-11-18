@@ -227,7 +227,12 @@ static void drawStatus() {
     drawLine(35, l2);
     bottom = "IP " + WiFi.localIP().toString();
   } else if (apActive) {
-    oled.drawStr(0, 24, ((firstSetup ? "Join " : "Wi-Fi ") + ownSSID).c_str());
+    {   // the board's own network: its name is the board's name, so make it fit the width
+      String w = (firstSetup ? "Join " : "WiFi ") + ownSSID;
+      if (oled.getStrWidth(w.c_str()) > 128) oled.setFont(u8g2_font_5x7_tf);
+      oled.drawStr(0, 24, w.c_str());
+      oled.setFont(u8g2_font_6x10_tf);
+    }
     String l2 = ownPass.length() >= 8 ? "Password: " + ownPass : String("Open network");
     if (!firstSetup && comsLastAt && millis() - comsLastAt < 15000) l2 = comsLastLine;
     drawLine(35, l2);

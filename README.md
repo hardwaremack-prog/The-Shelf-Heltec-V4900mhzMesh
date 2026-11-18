@@ -250,6 +250,10 @@ The same, with the module on the bottom side of the board (seen from underneath)
 
 ![microSD plugged in line on the bottom side of an ESP32](docs/sd-wiring-shelf-esp32-inline-flipped.png)
 
+**Adding a screen:** a 0.96" I2C OLED (SSD1306, pins GND VCC SCL SDA) takes four wires: GND to GND, VCC to 3V3, SCL to GPIO 22, SDA to GPIO 21. The Shelf finds it by itself.
+
+![0.96 inch OLED wiring on an ESP32](docs/oled-wiring-shelf-esp32.png)
+
 **Copying a card to another card (Windows):** [SD Card Imager](docs/SD-Card-Imager.zip) (source in `tools/sd-card-imager/`) saves a whole card to one compressed `.img.gz` and writes an image back onto a card. Unzip it and double-click *SD Card Imager.cmd*; it asks for admin rights, which Windows needs for reading or writing a whole card. Only SD cards and USB drives are listed.
 
 ## Backups

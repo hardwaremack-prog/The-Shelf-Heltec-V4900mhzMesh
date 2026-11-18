@@ -810,6 +810,6 @@ void loop() {
       char b[24]; snprintf(b, sizeof b, "%s %d%%", otaWhat == 'w' ? "Web app" : "Firmware", otaPercent);
       oledMsg("UPDATING", b, "Don't unplug"); otaShown = otaPercent; lastDraw = now;
     }
-  } else if (!btnDown && now - lastDraw > (scrolling ? 80u : 1000u)) { otaShown = -1; onlineShelves = onlinePeerCount(); drawScreen(); lastDraw = now; }
+  } else if (!btnDown && now - lastDraw > (scrolling ? 50u : 1000u)) { otaShown = -1; onlineShelves = onlinePeerCount(); drawScreen(); lastDraw = now; }
   delay(5);
 }

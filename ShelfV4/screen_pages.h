@@ -88,7 +88,9 @@ static void hand(int cx, int cy, float a, int len, float w) {
   oled.drawLine(cx, cy, tx, ty);
 }
 static void drawWatchPage() {
-  struct tm t; localNow(&t);
+  struct timeval tv; gettimeofday(&tv, nullptr);      // the second and its fraction from the same clock reading
+  time_t lt = tv.tv_sec + (time_t)tzMin * 60;
+  struct tm t; gmtime_r(&lt, &t);
   const int cx = 31, cy = 32;
   oled.drawCircle(cx, cy, 31); oled.drawCircle(cx, cy, 30);
   for (int i = 0; i < 60; i++) {
@@ -104,7 +106,7 @@ static void drawWatchPage() {
       oled.drawPixel(cx + (int)lroundf(s * 27), cy - (int)lroundf(c * 27));
     }
   }
-  float sec = t.tm_sec + (millis() % 1000) / 1000.0f;
+  float sec = t.tm_sec + tv.tv_usec / 1e6f;          // (millis() isn't in step with the clock: the hand jumped each second)
   float mn = t.tm_min + t.tm_sec / 60.0f, hr = (t.tm_hour % 12) + mn / 60.0f;
   hand(cx, cy, hr * (float)M_PI / 6, 15, 2.5f);
   hand(cx, cy, mn * (float)M_PI / 30, 23, 2.0f);

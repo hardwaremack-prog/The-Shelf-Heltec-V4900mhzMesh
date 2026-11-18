@@ -187,23 +187,35 @@ static void drawLine(int y, const String& t) {
   oled.drawStr(span - off, y, t.c_str());
 }
 
+// A little arrow into the top-right (up) or bottom-right corner, pointing at a button just past
+// the screen's edge, with an optional label (4x6 font, baseline y) to its left.
+static void arrowTo(bool up, const char* label, int y) {
+  if (up) { oled.drawLine(122, 6, 127, 1); oled.drawHLine(124, 0, 4); oled.drawVLine(127, 0, 4); }
+  else    { oled.drawLine(122, 57, 127, 62); oled.drawHLine(124, 63, 4); oled.drawVLine(127, 60, 4); }
+  if (label) { oled.setFont(u8g2_font_4x6_tf); oled.drawStr(128 - 7 - oled.getStrWidth(label), y, label); }
+}
+
 static void drawStatusPage() {
   // top bar: name, storage, battery
   oled.setFont(u8g2_font_helvB08_tf); oled.drawStr(0, 9, "THE SHELF");
   int x = oled.getStrWidth("THE SHELF") + 3;
-  oled.setFont(u8g2_font_5x7_tf); oled.drawStr(x, 9, BOARD_SHORT);
-  x += oled.getStrWidth(BOARD_SHORT) + 4;
+  oled.setFont(u8g2_font_5x7_tf);
+  if (!oledInline) { oled.drawStr(x, 9, BOARD_SHORT); x += oled.getStrWidth(BOARD_SHORT) + 4; }   // in line: room for "BOOT"
   const char* st = onSD ? "SD" : (comsOn() ? "FL" : "FLASH");
   oled.drawStr(x, 9, st);
+  int barEnd = x + oled.getStrWidth(st);
   if (comsOn()) {                                   // tiny antenna: 900MHz Coms is on
     x += oled.getStrWidth(st) + 4;
     oled.drawVLine(x + 3, 2, 7);
     oled.drawPixel(x + 1, 3); oled.drawPixel(x, 4); oled.drawPixel(x + 1, 5);
-    oled.drawPixel(x + 5, 3); oled.drawPixel(x + 6, 4); oled.drawPixel(x + 5, 5);
+    oled.drawPixel(x + 5, 3); oled.drawPixel(x + 6, 4); oled.drawPixel(x + 5, 5);    barEnd = x + 7;
   }
   int pct = batteryPercent();
   oled.setFont(u8g2_font_4x6_tf);
-  if (pct < 0) {
+  if (oledInline) {
+    // the screen plugged in line sits right beside the buttons: BOOT is past its top-right corner
+    arrowTo(true, barEnd + 4 < 128 - 7 - oled.getStrWidth("BOOT") ? "BOOT" : nullptr, 8);
+  } else if (pct < 0) {
     oled.drawStr(128 - oled.getStrWidth("USB"), 8, "USB");
   } else {
     String t = String(pct) + "%";
@@ -248,6 +260,23 @@ static void drawStatusPage() {
     String fr = fmtShort(storeTotal - storeUsed) + " free";
     oled.drawStr(128 - oled.getStrWidth(fr.c_str()), 46, fr.c_str());
   }
+  // what the two buttons do (EN/RST is a hardware reset: it restarts the board the moment it's pressed)
+  if (oledInline) {                                 // EN is past the bottom-right corner
+    oled.setFont(u8g2_font_5x7_tf);                 // a bit smaller, to leave room for "EN restart"
+    int bw = oled.getStrWidth(bottom.c_str());
+    oled.drawStr(0, 62, bottom.c_str());
+    oled.setFont(u8g2_font_4x6_tf);
+    const char* l = bw + 4 < 128 - 7 - oled.getStrWidth("EN restart") ? "EN restart" : bw + 4 < 128 - 7 - oled.getStrWidth("EN") ? "EN" : nullptr;
+    arrowTo(false, l, 62);
+    return;
+  }
+  oled.setFont(u8g2_font_4x6_tf);
+#if defined(SHELF_ESP32)
+  const char* keys = "EN = restart \xC2\xB7 BOOT = next page";
+#else
+  const char* keys = "RST = restart \xC2\xB7 PRG = next page";
+#endif
+  oled.drawUTF8((128 - oled.getUTF8Width(keys)) / 2, 53, keys);
   oled.setFont(u8g2_font_6x10_tf);
   oled.drawStr(0, 62, bottom.c_str());
 }

@@ -176,10 +176,10 @@ static void drawColorPage(uint32_t el) {
   oled.setFont(u8g2_font_helvB14_tf);
   if (oled.getStrWidth(DAILY_COLOR_NAMES[c]) > 112) oled.setFont(u8g2_font_helvB10_tf);
   int tw = oled.getStrWidth(DAILY_COLOR_NAMES[c]), x = (128 - tw - 12) / 2;
-  oled.drawDisc(x + 4, 25, 4);                       // a paint dot beside the name
-  oled.drawStr(x + 12, 31, DAILY_COLOR_NAMES[c]);
+  oled.drawDisc(x + 4, 29, 4);                       // a paint dot beside the name
+  oled.drawStr(x + 12, 35, DAILY_COLOR_NAMES[c]);
   oled.setFont(u8g2_font_6x10_tf);
-  drawPass(53, DAILY_COLOR_MEANINGS[c], el);
+  drawPass(61, DAILY_COLOR_MEANINGS[c], el);         // in the screen's bottom strip (yellow on two-color screens)
 }
 
 static void drawTempPage() {

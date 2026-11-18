@@ -59,9 +59,10 @@ static int onlineShelves = 0;
 String currentIP() { return staOK ? WiFi.localIP().toString() : WiFi.softAPIP().toString(); }
 
 // ------------------------------------------------------------ OLED
-static bool probeOLED() {
+static bool oledInline = false;
+static bool probeOLED(int sda = OLED_SDA, int scl = OLED_SCL) {
   if (OLED_RST != 255) { pinMode(OLED_RST, OUTPUT); digitalWrite(OLED_RST, LOW); delay(20); digitalWrite(OLED_RST, HIGH); delay(20); }
-  Wire.begin(OLED_SDA, OLED_SCL);
+  Wire.begin(sda, scl);
   Wire.beginTransmission(OLED_ADDR);
   bool ok = Wire.endTransmission() == 0;
   Wire.end();
@@ -76,8 +77,27 @@ static bool tryVext(int pin, int level) { pinMode(pin, OUTPUT); digitalWrite(pin
 static void powerOLED() {
 #if defined(SHELF_ESP32)
   oledOK = probeOLED();             // a screen is optional here: no screen, no drawing
+#ifdef OLED_INLINE_VCC
+  if (!oledOK) {
+    // In line: the screen plugged straight onto 27 · 14 · 12 · GND (turned around), powered from
+    // GPIO 12 (a screen like this draws ~10-20 mA, well within what a pin can give).
+    gpio_set_drive_capability((gpio_num_t)OLED_INLINE_VCC, GPIO_DRIVE_CAP_3);
+    pinMode(OLED_INLINE_VCC, OUTPUT); digitalWrite(OLED_INLINE_VCC, HIGH);
+    delay(120);
+    oledOK = probeOLED(OLED_INLINE_SDA, OLED_INLINE_SCL);
+    if (oledOK) {
+      u8x8_SetPin(oled.getU8x8(), U8X8_PIN_I2C_DATA, OLED_INLINE_SDA);
+      u8x8_SetPin(oled.getU8x8(), U8X8_PIN_I2C_CLOCK, OLED_INLINE_SCL);
+      Serial.println("[shelf] screen found on the in-line pins (SDA 27, SCL 14, power 12)");
+      oledInline = true;
+    } else {
+      digitalWrite(OLED_INLINE_VCC, LOW); pinMode(OLED_INLINE_VCC, INPUT);   // nothing there
+    }
+  }
+#endif
   if (!oledOK) return;
   oled.begin();
+  if (oledInline) oled.setDisplayRotation(U8G2_R2);   // it's plugged in turned around: turn the picture to match
   oled.setContrast(200);
   return;
 #endif

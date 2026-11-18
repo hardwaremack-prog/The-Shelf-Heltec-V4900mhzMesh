@@ -42,6 +42,9 @@
 #define OLED_SCL   22
 #define OLED_RST   255    // U8X8_PIN_NONE
 #define OLED_ADDR  0x3C
+#define OLED_INLINE_SDA 27   // a screen plugged straight onto 27 · 14 · 12 · GND (turned around): tried
+#define OLED_INLINE_SCL 14   // if there's none on 21/22, with its power from GPIO 12
+#define OLED_INLINE_VCC 12
 #define PIN_BUTTON 0      // BOOT button
 #define PIN_VEXT   255    // none of these exist here; the code that uses them never runs on this board
 #define PIN_VEXT_R8 255

@@ -254,6 +254,10 @@ The same, with the module on the bottom side of the board (seen from underneath)
 
 ![0.96 inch OLED wiring on an ESP32](docs/oled-wiring-shelf-esp32.png)
 
+**Screen in line, no wires:** on a 38-pin board the screen can plug straight onto 27 · 14 · 12 · GND on the bottom row, turned around (lying over the board). The firmware powers it from GPIO 12 and turns the picture round; it looks on 21/22 first, then here.
+
+![0.96 inch OLED plugged in line on an ESP32](docs/oled-wiring-shelf-esp32-inline.png)
+
 **Copying a card to another card (Windows):** [SD Card Imager](docs/SD-Card-Imager.zip) (source in `tools/sd-card-imager/`) saves a whole card to one compressed `.img.gz` and writes an image back onto a card. Unzip it and double-click *SD Card Imager.cmd*; it asks for admin rights, which Windows needs for reading or writing a whole card. Only SD cards and USB drives are listed.
 
 ## Backups

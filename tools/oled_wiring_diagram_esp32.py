@@ -71,5 +71,71 @@ def svg():
     o.append('</svg>')
     return '\n'.join(o)
 
+
+def svg_inline():
+    """In line: the screen plugged straight onto the bottom header at 27 · 14 · 12 · GND, turned
+    around so its GND lands on GND. Its VCC lands on GPIO 12, which the firmware switches on to power
+    it. No wires at all."""
+    W, H = 1200, 640
+    bx, by, bw, bh = 170, 150, 860, 300
+    px0 = bx + 70; pstep = (bw - 140) / 18
+    pinx = lambda i: px0 + i * pstep
+    topy = by + 28; boty = by + bh - 28
+    sd = [('SDA', '27', '#4cd964', 10), ('SCL', '14', '#3aa0ff', 11), ('VCC', '12', '#ff5a5a', 12), ('GND', 'GND', '#9aa4ae', 13)]
+    mx0, mx1 = pinx(10) - 60, pinx(13) + 60
+    my, mh = by + bh + 60, 250
+    o = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBox="0 0 {W} {H}" font-family="Segoe UI,Roboto,Helvetica,Arial,sans-serif">',
+         f'<rect width="{W}" height="{H}" fill="#0b0f14"/>',
+         '<text x="40" y="44" fill="#fff" font-size="28" font-weight="700">OLED screen in line → The Shelf on an ESP32 (38-pin NodeMCU)</text>',
+         '<text x="40" y="74" fill="#7f93a8" font-size="16">No wires: the screen plugs straight onto 27 · 14 · 12 · GND on the bottom row, turned around so its GND lands on GND.</text>',
+         '<text x="40" y="98" fill="#7f93a8" font-size="16">The board powers it from GPIO 12. Firmware 1.11.1 or later finds it by itself (it looks on 21/22 first, then here).</text>']
+    o.append(f'<rect x="{bx}" y="{by}" width="{bw}" height="{bh}" rx="12" fill="#141a22" stroke="#3a4a5c" stroke-width="3"/>')
+    o.append(f'<rect x="{bx+bw-12}" y="{by+bh/2-32}" width="46" height="64" rx="8" fill="#9aa4ae" stroke="#5f6b78" stroke-width="3"/>')
+    o.append(f'<text x="{bx+bw+11}" y="{by+bh/2+56}" fill="#7f93a8" font-size="14" text-anchor="middle">USB</text>')
+    o.append(f'<rect x="{bx+90}" y="{by+70}" width="330" height="160" rx="6" fill="#b9c0c8" stroke="#7d8793" stroke-width="3"/>')
+    o.append(f'<path d="M{bx+100},{by+90} h50 v40 h-30 v40 h30 v40 h-50" fill="none" stroke="#d4af37" stroke-width="5"/>')
+    o.append(f'<text x="{bx+290}" y="{by+148}" fill="#2a2f36" font-size="20" font-weight="700" text-anchor="middle">ESP32-WROOM-32</text>')
+    o.append(f'<text x="{bx+290}" y="{by+176}" fill="#4b5563" font-size="14" text-anchor="middle">antenna end</text>')
+    o.append(f'<rect x="{bx+560}" y="{by+120}" width="40" height="40" rx="6" fill="#2b3a4b"/><text x="{bx+580}" y="{by+190}" fill="#7f93a8" font-size="13" text-anchor="middle">BOOT (IO0)</text>')
+    o.append(f'<rect x="{bx+680}" y="{by+120}" width="40" height="40" rx="6" fill="#2b3a4b"/><text x="{bx+700}" y="{by+190}" fill="#7f93a8" font-size="13" text-anchor="middle">EN</text>')
+    used = {('bot', idx): col for _, _, col, idx in sd}
+    for row, names, y, ty in (('top', TOP, topy, topy + 32), ('bot', BOT, boty, boty - 20)):
+        for i, name in enumerate(names):
+            x = pinx(i); hit = (row, i) in used
+            col = used.get((row, i), '#3a4a5c')
+            o.append(f'<circle cx="{x}" cy="{y}" r="{11 if hit else 8}" fill="{col if hit else "#0b0f14"}" stroke="{col if hit else "#6b7d90"}" stroke-width="3"/>')
+            if not hit: o.append(f'<text x="{x}" y="{ty}" fill="#6b7d90" font-size="12" text-anchor="middle">{name}</text>')
+    # the screen turned around (header along its bottom edge), plugged onto the bottom row and
+    # lying over the board; The Shelf turns the picture round so it reads the right way up
+    sw2, sh2 = mx1 - mx0, 250
+    sx2, sy2 = mx0, boty + 30 - sh2
+    o.append(f'<rect x="{sx2}" y="{sy2}" width="{sw2}" height="{sh2}" rx="12" fill="#1d4f8f" fill-opacity="0.94" stroke="#3a78c2" stroke-width="3"/>')
+    o.append(f'<rect x="{sx2+24}" y="{sy2+26}" width="{sw2-48}" height="150" rx="4" fill="#05070a" stroke="#2a2f36" stroke-width="3"/>')
+    o.append(f'<text x="{sx2+sw2/2}" y="{sy2+95}" fill="#7fd6ff" font-size="15" font-family="Consolas,monospace" text-anchor="middle">THE SHELF ESP32</text>')
+    o.append(f'<text x="{sx2+sw2/2}" y="{sy2+120}" fill="#7fd6ff" font-size="13" font-family="Consolas,monospace" text-anchor="middle">http://10.0.0.126</text>')
+    o.append(f'<text x="{sx2+sw2/2}" y="{by+bh+56}" fill="#a9c7ee" font-size="14" text-anchor="middle">the screen turned around, lying over the board (The Shelf turns its picture round to match)</text>')
+    for lab, pin, col, idx in sd:
+        x = pinx(idx)
+        o.append(f'<rect x="{x-14}" y="{sy2+sh2-58}" width="28" height="7" rx="3" fill="{col}"/>')
+        o.append(f'<text x="{x}" y="{sy2+sh2-64}" fill="#fff" font-size="13" font-weight="700" text-anchor="middle">{lab}</text>')
+    for lab, pin, col, idx in sd:                         # its pins in the header (on top of it)
+        x = pinx(idx)
+        o.append(f'<circle cx="{x}" cy="{boty}" r="11" fill="{col}" stroke="#d4af37" stroke-width="3"/>')
+        o.append(f'<text x="{x}" y="{by+bh+24}" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">{pin}</text>')
+    lx, ly = 40, 540
+    x = lx
+    for a, b, c, _ in sd:
+        t = f'{a} → {("GPIO "+b) if b.isdigit() else b}'
+        o.append(f'<rect x="{x}" y="{ly-14}" width="22" height="8" rx="4" fill="{c}"/>')
+        o.append(f'<text x="{x+30}" y="{ly-6}" fill="#d7e3ee" font-size="16" font-weight="600">{t}</text>')
+        x += 30 + len(t) * 8.8 + 26
+    lines = ['For 38-pin boards whose bottom row reads 3V3 · EN · VP · VN · 34 · 35 · 32 · 33 · 25 · 26 · 27 · 14 · 12 · GND … (check the printing first).',
+             'Free pins: the microSD card (5, 17, 18, 19, 23) is unaffected. If the board ever won\'t start with the screen on, unplug it and use the 4-wire layout.']
+    for n, l in enumerate(lines):
+        o.append(f'<text x="40" y="{ly+28+n*20}" fill="#7f93a8" font-size="14">{l}</text>')
+    o.append('</svg>')
+    return '\n'.join(o)
+
 out = sys.argv[1] if len(sys.argv) > 1 else '.'
 open(f'{out}/oled-wiring-shelf-esp32.svg', 'w').write(svg())
+open(f'{out}/oled-wiring-shelf-esp32-inline.svg', 'w').write(svg_inline())

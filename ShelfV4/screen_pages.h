@@ -184,25 +184,25 @@ static void drawColorPage(uint32_t el) {
 static void drawTempPage() {
   header("CPU TEMPERATURE");
   float c = temperatureRead();
-  // a thermometer
-  oled.drawRFrame(8, 16, 9, 32, 4); oled.drawCircle(12, 53, 7); oled.drawDisc(12, 53, 5);
-  oled.setDrawColor(0); oled.drawBox(9, 44, 7, 6); oled.setDrawColor(1);
-  int lvl = constrain((int)((c - 20) * 26 / 70), 2, 26);   // 20..90 C fills the tube
-  oled.drawBox(10, 48 - lvl, 5, lvl + 3);
+  // a thermometer, kept in the top (blue) part
+  oled.drawRFrame(8, 13, 9, 26, 4); oled.drawCircle(12, 41, 6); oled.drawDisc(12, 41, 4);
+  oled.setDrawColor(0); oled.drawBox(9, 35, 7, 4); oled.setDrawColor(1);
+  int lvl = constrain((int)((c - 20) * 20 / 70), 2, 20);   // 20..90 C fills the tube
+  oled.drawBox(10, 37 - lvl, 5, lvl + 3);
   char b[24];
   snprintf(b, sizeof b, "%.0f\xC2\xB0" "C", c);
   oled.setFont(u8g2_font_helvB18_tf);
-  oled.drawUTF8(30, 38, b);
+  oled.drawUTF8(30, 36, b);
   snprintf(b, sizeof b, "%.0f\xC2\xB0" "F", c * 9 / 5 + 32);
   oled.setFont(u8g2_font_helvB10_tf);
-  oled.drawUTF8(128 - oled.getUTF8Width(b), 38, b);
+  oled.drawUTF8(128 - oled.getUTF8Width(b), 36, b);
   uint32_t up = millis() / 60000;
   if (up >= 1440) snprintf(b, sizeof b, "Up %ud %uh", (unsigned)(up / 1440), (unsigned)(up % 1440 / 60));
   else snprintf(b, sizeof b, "Up %uh %um", (unsigned)(up / 60), (unsigned)(up % 60));
   oled.setFont(u8g2_font_5x7_tf);
-  oled.drawStr(30, 52, b);
+  oled.drawStr((128 - oled.getStrWidth(b)) / 2, 55, b);   // both lines in the bottom (yellow) strip
   snprintf(b, sizeof b, "%u KB memory free", (unsigned)(ESP.getFreeHeap() / 1024));
-  oled.drawStr(30, 62, b);
+  oled.drawStr((128 - oled.getStrWidth(b)) / 2, 63, b);
 }
 
 // ---- the carousel

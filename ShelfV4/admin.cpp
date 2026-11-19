@@ -107,6 +107,7 @@ static bool tokenValid(const String& t) {
 }
 static bool unlocked(AsyncWebServerRequest* r) { return tokenValid(cookieToken(r)); }
 bool canWrite(AsyncWebServerRequest* r) { return !readOnlyOn() || unlocked(r); }
+bool adminUnlocked(AsyncWebServerRequest* r) { return unlocked(r); }   // folder locks: the admin is the host
 
 // Requests that still go through in read-only mode: looking, playing, chatting.
 bool allowedWhenReadOnly(const String& url, WebRequestMethod m) {
@@ -115,6 +116,7 @@ bool allowedWhenReadOnly(const String& url, WebRequestMethod m) {
   if (url.startsWith("/api/messaging/")) return true;                 // Messages and other Shelves saying hello
   if (url == "/api/coms/send" || url.startsWith("/api/coms/remote/")) return true;
   if (url == "/api/board/time" || url == "/api/board/showing") return true;   // the clock, the screen
+  if (url == "/api/locks/unlock" || url == "/api/locks/relock") return true;  // folder locks' viewing password
   if (url.startsWith("/api/bt/") && url != "/api/bt/power" && url != "/api/bt/forget") return true;   // playing to a headset
   if (url.startsWith("/api/files/") && (url.endsWith("/play") || url.endsWith("/thumbnail"))) return true;   // play counts, auto thumbnails
   return false;

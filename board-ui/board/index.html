@@ -84,6 +84,8 @@ label.l{font-size:13px;color:var(--muted)}
       </div>
       <div class="btns"><button class="pri" onclick="chgPw()">Change it</button><button class="bad" onclick="rmPw()">Remove the admin password</button></div>
     </details>
+    <p class="tip" style="margin-top:14px"><b>&#128274; Folder locks:</b> put chosen shelves and tools (say Pictures, or Notes) behind a viewing password. Others can look once they enter it, but only the admin can change them. To set them up, unlock this browser as the admin, then open The Shelf: <b>Folder locks&hellip;</b> and the <b>Read-only password</b> switch are in the sidebar.</p>
+    <div class="field" id="hostUnlock" style="margin-top:8px"><input id="hostPw" type="password" placeholder="Admin password" autocomplete="current-password"><button class="pri" onclick="hostUnlock()">Unlock as admin</button></div>
   </div>
   <div class="msg" id="aMsg"></div>
 
@@ -173,6 +175,7 @@ let A={};
 async function loadAdmin(){try{A=await fetch('/api/admin/status').then(r=>r.json())}catch(e){return}
   $('#adm').innerHTML=[['Admin password',A.adminSet?'Set':'Not set'],['Mode',A.readOnly?'Read-only':'Anyone on the Wi-Fi can make changes'],['This browser',!A.readOnly?'Can make changes':A.unlocked?'Unlocked for changes':'Locked']]
     .map(r=>`<div class="kv"><span>${r[0]}</span><span>${esc(r[1])}</span></div>`).join('')+(A.unlocked?'<div class="kv"><span></span><span><button onclick="lockNow()">Lock this browser</button></span></div>':'');
+  $('#hostUnlock').style.display=A.unlocked?'none':'flex';
   $('#admSet').style.display=A.adminSet?'none':'block';$('#admOn').style.display=A.adminSet?'block':'none';
   $('#roOn').classList.toggle('on',!!A.readOnly);$('#roOff').classList.toggle('on',!A.readOnly);
   $('#lockbar').style.display=A.canWrite?'none':'block'}
@@ -185,6 +188,7 @@ async function rmPw(){if(!confirm('Remove the admin password? Read-only mode tur
 async function setRO(on){let pw='';if(!on&&!A.unlocked){pw=prompt('Admin password to turn read-only off');if(pw===null)return}
   try{await post('/api/admin/readonly',{on,password:pw});aMsg(on?'Read-only is on.':'Read-only is off.');loadAdmin()}catch(e){aMsg(e.message,1)}}
 async function unlock(){try{await post('/api/admin/unlock',{password:$('#unlockPw').value});$('#unlockPw').value='';$('#unlockMsg').textContent='';loadAdmin()}catch(e){$('#unlockMsg').textContent=e.message;$('#unlockMsg').className='msg err'}}
+async function hostUnlock(){try{await post('/api/admin/unlock',{password:$('#hostPw').value});$('#hostPw').value='';aMsg('Unlocked as the admin in this browser for 8 hours.');loadAdmin()}catch(e){aMsg(e.message,1)}}
 async function lockNow(){await post('/api/admin/lock');loadAdmin()}
 $('#unlockPw').addEventListener('keydown',e=>{if(e.key==='Enter')unlock()});
 async function thShow(){let j;try{j=await fetch('/api/thumbs/import').then(r=>r.json())}catch(e){return}

@@ -591,7 +591,7 @@ class ShelfHandler : public AsyncWebHandler {
   }
 
   void handleUpload(AsyncWebServerRequest* r, const String& fn, size_t index, uint8_t* data, size_t len, bool final) override {
-    if (!canWrite(r)) return;               // read-only: handleRequest answers 403
+    if (!canWrite(r) || lockBlocksUpload(r)) return;   // read-only, or a locked shelf: handleRequest answers 403
     handleUploadPart(r, fn, index, data, len, final);
   }
 
@@ -603,6 +603,8 @@ class ShelfHandler : public AsyncWebHandler {
     Body* b = bodyOf(r);
     if (b && b->tooBig) { sendErr(r, 413, "That's too big for the board to take in one go."); cleanup(r); return; }
     if (handleAdminApi(r, url, m)) { cleanup(r); return; }
+    if (handleLocksApi(r, url, m)) { cleanup(r); return; }
+    if (lockGate(r, url, m)) { cleanup(r); return; }   // a locked folder: viewing password, and read-only
     // read-only mode: only looking, playing and chatting get through until write mode is unlocked
     if (!allowedWhenReadOnly(url, m) && !canWrite(r)) { sendReadOnly(r); cleanup(r); return; }
 
@@ -755,6 +757,7 @@ void setup() {
   scrAutoSleep = prefs.getBool("scrsleep", true);
   firstSetup = !hotspotMode && !wifiSSID.length();
   adminBegin();
+  locksBegin();
 
   if (!LittleFS.begin(false, "/www", 10, "www")) oledMsg("Web app missing", "Re-flash from the", "installer page");
   setupStorage();

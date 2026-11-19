@@ -185,6 +185,12 @@ bool readOnlyOn();
 void setReadOnly(bool on);
 void adminClear();
 bool canWrite(AsyncWebServerRequest* r);
+bool adminUnlocked(AsyncWebServerRequest* r);
+// locks.cpp: folder locks (a read-only viewing password for chosen shelves and tools)
+void locksBegin();
+bool handleLocksApi(AsyncWebServerRequest* r, const String& url, WebRequestMethod m);
+bool lockGate(AsyncWebServerRequest* r, const String& url, WebRequestMethod m);
+bool lockBlocksUpload(AsyncWebServerRequest* r);
 bool allowedWhenReadOnly(const String& url, WebRequestMethod m);
 void sendReadOnly(AsyncWebServerRequest* r);
 uint32_t meshNodeId();

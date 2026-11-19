@@ -1,6 +1,7 @@
-/* The Shelf for Heltec V4: hide the parts that need The Shelf on a computer. */
+/* The Shelf for Heltec V4: hide the parts that need The Shelf on a computer.
+   (The sidebar's switch group stays: folder locks put their switch there.) */
 :root { --cat-MIDI: #8E7CF0; }   /* the MIDI shelf */
-#powerToggleRow, #localhostOnlyToggleRow, #authIndicator, .power-toggle-group, #secureModeToggleRow, #openWriteToggleRow,
+#powerToggleRow, #localhostOnlyToggleRow, #authIndicator, #secureModeToggleRow, #openWriteToggleRow,
 #imagineBtn, #standardizeNamesBtn, #clearArtBtn, #exportListBtn, #removeDuplicatesBtn,
 .track-edit-tags, .portal-section.backup-section,
 [data-act="vnc"], #shelfUpdateBox, #sidebarUpdateBtn { display: none !important; }

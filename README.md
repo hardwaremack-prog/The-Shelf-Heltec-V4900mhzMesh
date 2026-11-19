@@ -219,6 +219,10 @@ The **Heltec V4** card at the bottom of The Shelf's sidebar opens the board's se
 
 *Screenshots use sample files and messages.*
 
+## Folder locks
+
+The same folder locks as The Shelf on a computer: put chosen shelves (say Pictures) and tools (Notes, Docs, Sheets, Slides, Draw, Messages) behind a **viewing password**. Anyone else has to enter it to look, for 2 hours at a time, and locked folders are always read-only for them. On a board, the **admin** is the host: set an admin password on the board's settings page and unlock that browser as the admin, then use **Folder locks…** and the **Read-only password** switch in The Shelf's sidebar. Card backups are admin-only while any lock is on. Clearing the admin password with the button also turns the locks off.
+
 ## Messages between Shelves
 
 The board talks to other Shelves the same way they talk to each other: `shelf-presence` broadcasts on UDP port 41234, a network scan that asks every address on port 8080 "are you a Shelf?", and direct HTTP for messages. That's why the board answers on **port 8080** as well as port 80. Click the board in another Shelf's Messages list to chat, or choose **Connect Shelf** to open it.

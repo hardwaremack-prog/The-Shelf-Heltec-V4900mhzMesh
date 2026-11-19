@@ -87,6 +87,19 @@ if "board.js" not in html or "board.css" not in html:
     sys.exit("Couldn't add board.js/board.css to index.html")
 (stage / "index.html").write_text(html, encoding="utf-8")
 
+# folder locks: on a board the "host" is the admin (a browser unlocked with the admin password)
+lk = stage / "locks.js"
+if lk.exists():
+    t = lk.read_text(encoding="utf-8")
+    for a, b in [
+        ("Other devices can look once they enter it, but can never change locked folders — only this computer can. This computer is never asked.",
+         "Others can look once they enter it, but can never change locked folders: only the admin can (a browser unlocked with the admin password), and the admin is never asked."),
+        ("Backups are host-only while any lock is on.", "Card backups are admin-only while any lock is on."),
+    ]:
+        if a not in t: sys.exit("pack_www: locks.js wording changed -- update the board's replacements")
+        t = t.replace(a, b)
+    lk.write_text(t, encoding="utf-8")
+
 # ---- the board's own bits
 for src in (ROOT / "board-ui").rglob("*"):
     if src.is_file():

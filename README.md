@@ -74,7 +74,7 @@ Your shelves are normal folders at the top of the card: `Pictures`, `Music`, `MI
 
 1. Install with the [web installer](https://hardwaremack-prog.github.io/The-Shelf-Heltec-V4900mhzMesh/) (Chrome or Edge).
 2. Power the board. The screen shows **Join The-Shelf-XXXX**. Join it from your phone with the password **`theshelf`**.
-3. The setup page opens (or go to `http://192.168.4.1`). Tap **Find networks**, pick your Wi-Fi and enter its password.
+3. The setup page opens (or go to `http://10.1.1.250`). Tap **Find networks**, pick your Wi-Fi and enter its password.
 4. Back on your home Wi-Fi, open the address on the screen, or **`http://shelf-v4-xxxx.local`**.
 
 ### 900MHz Coms (LoRa mesh between boards)
@@ -168,9 +168,9 @@ You can turn read-only on or off remotely over 900MHz Coms too. The password isn
 
 ### Its own Wi-Fi (car, camping, anywhere)
 
-On the settings page, choose **Use its own Wi-Fi**, then pick a network name and password. The board then runs its own network instead of joining yours, and The Shelf works fully on it. Join that network on your phone or laptop and open `http://192.168.4.1` (or `http://shelf-v4-xxxx.local`).
+On the settings page, choose **Use its own Wi-Fi**, then pick a network name and password. The board then runs its own network instead of joining yours, and The Shelf works fully on it. Join that network on your phone or laptop and open `http://10.1.1.250` (or `http://shelf-v4-xxxx.local`).
 
-**Your phone keeps its cellular data.** The board's own network has no internet, and it says so. It hands out no gateway or DNS server, so an iPhone shows **"No Internet Connection"** under the network name. It stays joined for The Shelf (everything on 192.168.4.x) and sends everything else over cellular, so texts, iMessage, calls and apps keep working while you're connected. Android phones do the same. The only time the board acts as a sign-in page is first-time setup, for the minute or two it takes to pick your Wi-Fi. The board borrows the time from the first browser that opens it, so notes and files get the right dates. Messages with other Shelves needs your home Wi-Fi.
+**Your phone keeps its cellular data.** The board's own network has no internet, and it says so. It hands out no gateway or DNS server, so an iPhone shows **"No Internet Connection"** under the network name. It stays joined for The Shelf (everything on 10.1.1.x) and sends everything else over cellular, so texts, iMessage, calls and apps keep working while you're connected. Android phones do the same. The only time the board acts as a sign-in page is first-time setup, for the minute or two it takes to pick your Wi-Fi. The board borrows the time from the first browser that opens it, so notes and files get the right dates. Messages with other Shelves needs your home Wi-Fi.
 
 If the board is set to join your home Wi-Fi but can't find it at power-up, it starts its own Wi-Fi anyway and keeps looking for home.
 

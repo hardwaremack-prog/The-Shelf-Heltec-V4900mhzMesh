@@ -353,7 +353,7 @@ static void startAP() {
     dns.start(53, "*", WiFi.softAPIP());
   } else {
     // Own Wi-Fi: hand out NO gateway and NO DNS server. Phones then mark the network
-    // "No Internet Connection", stay joined for The Shelf (192.168.4.1 / name.local),
+    // "No Internet Connection", stay joined for The Shelf (10.1.1.250 / name.local),
     // and keep using cellular data for everything else - texts, iMessage, apps.
     esp_netif_t* ap = esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
     if (ap) {

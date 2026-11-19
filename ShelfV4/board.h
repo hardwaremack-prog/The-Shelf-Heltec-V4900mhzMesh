@@ -4,7 +4,11 @@
 // Same microSD wiring as Heltec Shelf Lite, so a board wired for that works as-is.
 #pragma once
 
-#define FW_VERSION "1.13.0"
+#define FW_VERSION "1.13.1"
+// Every board's own Wi-Fi has the same fixed address you can bookmark: http://10.1.1.250
+// (phones and laptops that join get 10.1.1.100 and up).
+#define AP_IP           10, 1, 1, 250
+#define AP_DHCP_START   10, 1, 1, 100
 // SHELF_ESP32: a plain ESP32 dev board (NodeMCU-32S / ESP32-DevKitC, ESP32-D0WD, 4 MB flash):
 // no LoRa radio, no battery, and a screen only if you add one (SSD1306 on GPIO 21/22).
 #if defined(SHELF_ESP32)
@@ -17,8 +21,6 @@
 // No screen, so it starts on its own Wi-Fi at a fixed address you can bookmark:
 // named after the board (shelf-esp32-xxxx), password theshelf, http://10.1.1.250 (home Wi-Fi can still be set in settings)
 #define DEFAULT_MODE    "hotspot"
-#define AP_IP           10, 1, 1, 250
-#define AP_DHCP_START   10, 1, 1, 100
 #elif defined(SHELF_V3)
 #define BOARD_NAME  "Heltec V3"
 #define BOARD_SHORT "V3"

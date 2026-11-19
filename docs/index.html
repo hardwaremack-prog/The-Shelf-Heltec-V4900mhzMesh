@@ -113,21 +113,22 @@ ul.ok{padding-left:20px;margin:0}ul.ok li{margin-bottom:6px}
   <p style="margin-top:14px"><b>Or plug it straight in.</b> 42 · 41 · 40 · 39 are in the same order as the module's CS · MOSI · CLK · MISO. Bend up its 3v3 and GND pins so they skip GPIO 45 and 38, then add two short jumpers to GND and 3V3 at the start of the row.</p>
   <img src="sd-inline-shelf.png" alt="Inline microSD mounting" style="width:100%;max-width:900px;border-radius:10px;margin:8px 0 14px">
   <p class="muted">On a V4, leave the GNSS kit unplugged: it shares GPIO 39–42. <b>V4-R8:</b> GPIO 40 powers its screen, so it keeps the older wiring: CS 4, MISO 6, CLK 47, MOSI 48 (<a href="sd-wiring-shelf-v4-r8.png">R8 diagram</a>). Coming from v1.5 or earlier on a V4 or V3? Move the four signal wires to the new pins. Use a FAT32 card; 32 GB cards come that way.</p>
-  <p style="margin-top:14px"><b>Plain ESP32 (NodeMCU / DevKitC):</b> the card goes on the ESP32's usual SPI pins. It must have a card: the 4 MB of flash is all taken by the firmware, its update loader and the web app. A 128&times;64 SSD1306 screen on GPIO 21 (SDA) and 22 (SCL) is optional; with one, it shows the same status screen as the Heltec boards.</p>
-  <img src="sd-wiring-shelf-esp32.png" alt="microSD wiring on an ESP32: 3v3 to 3V3, GND to GND, CS to GPIO 5, MOSI to GPIO 23, CLK to GPIO 18, MISO to GPIO 19" style="width:100%;max-width:900px;border-radius:10px;margin:8px 0 14px">
-  <p class="muted">Wiring it with the board upside down (pins pointing up)? <a href="sd-wiring-shelf-esp32-flipped.png">Flipped-over diagram</a>.</p>
-  <p class="muted"><b>Fewer wires:</b> on a 38-pin board the module can plug straight onto the header at GND · 19 · 18 · 5 · 17, turned around, with one jumper for 3V3 (firmware 1.10.1 and later finds the card on either wiring). <a href="sd-wiring-shelf-esp32-inline.png">In-line diagram</a> · <a href="sd-wiring-shelf-esp32-inline-flipped.png">on the bottom side</a>.</p>
-  <p class="muted"><b>Adding a screen:</b> a 0.96" I2C OLED goes on GND, 3V3, GPIO 22 (SCL) and GPIO 21 (SDA). <a href="oled-wiring-shelf-esp32.png">Screen diagram</a> · <a href="oled-wiring-shelf-esp32-inline.png">plugged in line, no wires</a>.</p>
-  <p class="muted"><b>Copying or backing up a card on Windows:</b> <a href="SD-Card-Imager.zip" download>SD Card Imager</a> saves a whole card to one compressed image file and writes it back onto another card (Windows 10/11, nothing to install: unzip and double-click <i>SD Card Imager.cmd</i>).</p>
+  <p style="margin-top:14px"><b>Plain ESP32 (NodeMCU / DevKitC):</b> it must have a microSD card: the 4 MB of flash is all taken by the firmware, its update loader and the web app. A 128&times;64 SSD1306 screen is optional; with one, it shows the same screen pages as the Heltec boards.</p>
+  <p style="margin-top:10px"><b>Recommended: in line on the bottom side, one jumper.</b> The module plugs straight onto five header pins in a row on the underside, <b>GND · 19 · 18 · 5 · 17</b>, its GND end towards the antenna. Bend its 3v3 pin away so it misses GPIO 16, and run one jumper from it to <b>3V3</b> on the other row. Firmware 1.10.1 and later finds the card on this wiring by itself.</p>
+  <img src="sd-wiring-shelf-esp32-inline-flipped.png" alt="microSD in line on the bottom side of the ESP32: GND to GND, MISO to GPIO 19, CLK to GPIO 18, MOSI to GPIO 5, CS to GPIO 17, and one jumper from 3v3 to 3V3" style="width:100%;max-width:900px;border-radius:10px;margin:8px 0 14px">
   <table>
     <tr><th>Module pin</th><th>ESP32 pin</th></tr>
-    <tr><td>3v3</td><td><b>3V3</b></td></tr>
     <tr><td>GND</td><td>GND</td></tr>
-    <tr><td>CS</td><td>GPIO 5</td></tr>
-    <tr><td>MOSI</td><td>GPIO 23</td></tr>
-    <tr><td>CLK (SCK)</td><td>GPIO 18</td></tr>
     <tr><td>MISO</td><td>GPIO 19</td></tr>
+    <tr><td>CLK (SCK)</td><td>GPIO 18</td></tr>
+    <tr><td>MOSI</td><td>GPIO 5</td></tr>
+    <tr><td>CS</td><td>GPIO 17</td></tr>
+    <tr><td>3v3</td><td><b>3V3</b>, with one jumper (its pin bent away from GPIO 16)</td></tr>
   </table>
+  <p class="muted" style="margin-top:10px">Check the printed pin names first: boards differ. 3V3 only, never 5V/VIN, and GPIO 16 stays empty. The same in-line wiring on the top side: <a href="sd-wiring-shelf-esp32-inline.png">in-line diagram</a>.</p>
+  <p class="muted"><b>Or with six wires</b> on the ESP32's usual SPI pins: 3v3 → 3V3, GND → GND, CS → GPIO 5, MOSI → GPIO 23, CLK → GPIO 18, MISO → GPIO 19. <a href="sd-wiring-shelf-esp32.png">Wired diagram</a> · <a href="sd-wiring-shelf-esp32-flipped.png">board flipped over</a>.</p>
+  <p class="muted"><b>Adding a screen:</b> a 0.96" I2C OLED plugs straight onto 27 · 14 · 12 · GND with no wires (<a href="oled-wiring-shelf-esp32-inline.png">in-line screen diagram</a>), or takes four wires to GND, 3V3, GPIO 22 (SCL) and GPIO 21 (SDA) (<a href="oled-wiring-shelf-esp32.png">wired screen diagram</a>).</p>
+  <p class="muted"><b>Copying or backing up a card on Windows:</b> <a href="SD-Card-Imager.zip" download>SD Card Imager</a> saves a whole card to one compressed image file and writes it back onto another card (Windows 10/11, nothing to install: unzip and double-click <i>SD Card Imager.cmd</i>).</p>
 
   <h2>3. Connect it to your Wi-Fi</h2>
   <ol>

@@ -264,7 +264,7 @@ Wiring it with the board upside down (pins pointing up)? The rows swap places:
 
 ![microSD plugged in line on an ESP32 with one jumper](docs/sd-wiring-shelf-esp32-inline.png)
 
-The same, with the module on the bottom side of the board (seen from underneath):
+The same, with the module on the bottom side of the board (seen from underneath). This is the recommended way, and the one the installer page shows first:
 
 ![microSD plugged in line on the bottom side of an ESP32](docs/sd-wiring-shelf-esp32-inline-flipped.png)
 

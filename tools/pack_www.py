@@ -119,6 +119,7 @@ if board != "V4":
                           "With a screen added (SSD1306 on GPIO 21/22), it sleeps after 5 minutes; press BOOT to wake it.")
             t = t.replace("Hold PRG for 6 seconds and let go to forget the Wi-Fi and go back to setup mode.",
                           "Hold BOOT for 6 seconds and let go to forget the home Wi-Fi and go back to its own Wi-Fi (named after the board, password theshelf) at http://10.1.1.250.")
+            t = t.replace("<b>900MHz Coms</b> (its radio listens all the time;", "<b>2.4GHz Mesh Coms</b> (it keeps the Wi-Fi radio listening;")
             t = t.replace("Hold PRG", "Hold BOOT")
             t = t.replace("PRG", "BOOT")                    # (deep sleep and any other mention of the button)
             t = t.replace("const BAND_NAME = '900MHz Coms';", "const BAND_NAME = '2.4GHz Mesh Coms';")

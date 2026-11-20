@@ -53,7 +53,10 @@ static SPIClass sdSPI(FSPI);
 static U8G2_SSD1306_128X64_NONAME_F_HW_I2C oled(U8G2_R0, OLED_RST, OLED_SCL, OLED_SDA);
 static bool oledOK = false, screenOn = true;
 static bool scrAutoSleep = true;                    // sleeps after 5 minutes; false: stays on, cycling clock and info pages
-static int tzMin = 0;                               // the browser's time zone, minutes east of UTC
+static int tzMin = 0;
+static bool pwrSave = true;                         // power saving while nobody's using it (setting)
+static volatile uint32_t lastWebAt = 0;             // the last web request, any kind
+static bool slowNow = false;                        // running slow: 80 MHz, Wi-Fi napping between beacons                               // the browser's time zone, minutes east of UTC
 static void oledPower(int save) { if (oledOK) oled.setPowerSave(save); }
 static uint32_t lastActivity = 0;
 static int onlineShelves = 0;
@@ -418,10 +421,41 @@ static void goDeepSleep() {
   esp_deep_sleep_start();
 }
 
+// ------------------------------------------------------------ power saving
+// Nobody using the board (no web requests for 90 seconds, nothing streaming or updating):
+// the CPU drops from 240 to 80 MHz, and on a home Wi-Fi the Wi-Fi radio naps between the
+// router's beacons (not while Coms is on: boards talking over 2.4 GHz need it listening).
+// The first request brings full speed straight back. On its own Wi-Fi the radio has to stay
+// awake for the phones joined to it, so there it's the CPU only.
+static bool wifiNap = false;
+static void powerTick(uint32_t now) {
+  bool busy = !pwrSave || now - lastWebAt < 90000 || streamsActive > 0 || otaPercent >= 0;
+  if (busy && slowNow) {
+    setCpuFrequencyMhz(240);
+    slowNow = false;
+  } else if (!busy && !slowNow) {
+    setCpuFrequencyMhz(80);
+    slowNow = true;
+  }
+  bool nap = slowNow && staOK && !apActive && !comsOn();
+  if (nap != wifiNap) { WiFi.setSleep(nap); wifiNap = nap; }
+}
+// A battery run flat hurts it: below 3.3 V for two minutes (on battery, not USB), the board says
+// so and goes into deep sleep, waking every hour to look again (or when PRG is pressed).
+static uint32_t lowSince = 0;
+static void lowBatteryTick(uint32_t now) {
+  if (batteryPercent() < 0 || battV >= 3.30f) { lowSince = 0; return; }
+  if (!lowSince) { lowSince = now | 1; return; }
+  if (now - lowSince < 120000) return;
+  oledMsg("Battery empty", "Charge it, then press", WAKE_BUTTON " to start", "Sleeping now");
+  delay(3000);
+  sleepMinutes = 60; goDeepSleep();
+}
+
 static void onJoined() {
   staOK = true;
   Serial.printf("[shelf] joined \"%s\" as %s\n", wifiSSID.c_str(), WiFi.localIP().toString().c_str());
-  WiFi.setSleep(false);
+  WiFi.setSleep(false); wifiNap = false;            // power saving looks again on the next loop
   startMDNS();
   if (!ntpStarted) { configTime(0, 0, "pool.ntp.org", "time.google.com"); ntpStarted = true; }
 }
@@ -446,7 +480,7 @@ bool handleBoardApi(AsyncWebServerRequest* r, const String& url, WebRequestMetho
       "\",\"ip\":\"" + currentIP() + "\",\"ssid\":\"" + jsonEsc(staOK ? WiFi.SSID() : String("")) + "\",\"rssi\":" + (staOK ? WiFi.RSSI() : 0) +
       ",\"ap\":" + (apActive ? "true" : "false") + ",\"apName\":\"" + jsonEsc(ownSSID) + "\",\"hotspot\":" + (hotspotMode ? "true" : "false") +
       ",\"setup\":" + (firstSetup ? "true" : "false") + ",\"homeSsid\":\"" + jsonEsc(wifiSSID) + "\",\"apOpen\":" + (ownPass.length() >= 8 ? "false" : "true") + ",\"apPass\":\"" + jsonEsc(ownPass) + "\"" +
-      ",\"clients\":" + (apActive ? WiFi.softAPgetStationNum() : 0) + ",\"timeSet\":" + (time(nullptr) > 1700000000 ? "true" : "false") + ",\"tz\":" + tzMin + ",\"scrSleep\":" + (scrAutoSleep ? "true" : "false") +
+      ",\"clients\":" + (apActive ? WiFi.softAPgetStationNum() : 0) + ",\"timeSet\":" + (time(nullptr) > 1700000000 ? "true" : "false") + ",\"tz\":" + tzMin + ",\"scrSleep\":" + (scrAutoSleep ? "true" : "false") + ",\"pwrSave\":" + (pwrSave ? "true" : "false") + ",\"cpuMhz\":" + getCpuFrequencyMhz() +
       ",\"uptime\":" + (millis() / 1000) +
       ",\"sdPins\":\"" SD_PINS "\",\"sdRetries\":" + String(sdRetries) + ",\"sdFailures\":" + String(sdFailures) + ",\"heap\":" + ESP.getFreeHeap() + ",\"psram\":" + ESP.getPsramSize() + "}";
     sendJson(r, 200, s); return true;
@@ -496,6 +530,10 @@ bool handleBoardApi(AsyncWebServerRequest* r, const String& url, WebRequestMetho
     String cat = b["cat"] | "", name = b["name"] | "";
     if (cat == "Pictures" && name.length() && name.length() < 120 && name.indexOf('/') < 0) screenShowing(cat, name);
     sendJson(r, 200, "{\"ok\":true}"); return true;
+  }
+  if (url == "/api/board/powersave") {        // {on:true}: slow down while nobody's using it
+    pwrSave = b["on"] | true; prefs.putBool("pwrsave", pwrSave);
+    sendJson(r, 200, String("{\"ok\":true,\"pwrSave\":") + (pwrSave ? "true" : "false") + "}"); return true;
   }
   if (url == "/api/board/screen") {           // {sleep:true}: the screen sleeps after 5 minutes; false: stays on
     scrAutoSleep = b["sleep"] | false; prefs.putBool("scrsleep", scrAutoSleep); screenWake();
@@ -591,12 +629,14 @@ class ShelfHandler : public AsyncWebHandler {
   }
 
   void handleUpload(AsyncWebServerRequest* r, const String& fn, size_t index, uint8_t* data, size_t len, bool final) override {
+    lastWebAt = millis();
     if (!canWrite(r) || lockBlocksUpload(r)) return;   // read-only, or a locked shelf: handleRequest answers 403
     handleUploadPart(r, fn, index, data, len, final);
   }
 
   void handleRequest(AsyncWebServerRequest* r) override {
     // (web requests no longer keep the screen awake: an open page polls all night)
+    lastWebAt = millis();                   // someone's using it: full speed (see powerTick)
     const String& url = r->url();
     WebRequestMethod m = (WebRequestMethod)r->method();
     if (m == HTTP_OPTIONS) { r->send(204); return; }
@@ -740,6 +780,11 @@ void setup() {
   oledMsg("THE SHELF", BOARD_NAME, "Starting...");
   ledBegin();
 
+  readBattery();                                    // still flat after waking from a low-battery sleep? sleep on
+  if (batteryPercent() >= 0 && battV < 3.35f && esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER) {
+    oledMsg("Battery empty", "Charge it, then press", WAKE_BUTTON " to start"); delay(2000);
+    sleepMinutes = 60; goDeepSleep();
+  }
   prefs.begin("shelf", false);
   uint64_t mac = ESP.getEfuseMac();
   char tag[5]; snprintf(tag, sizeof tag, "%02x%02x", (uint8_t)(mac >> 32), (uint8_t)(mac >> 40));
@@ -755,6 +800,7 @@ void setup() {
   ownPass = prefs.getString("appass", AP_PASS);
   tzMin = prefs.getInt("tz", 0);
   scrAutoSleep = prefs.getBool("scrsleep", true);
+  pwrSave = prefs.getBool("pwrsave", true);
   firstSetup = !hotspotMode && !wifiSSID.length();
   adminBegin();
   locksBegin();
@@ -798,6 +844,8 @@ void loop() {
   if (rebootSoon) { rebootSoon = false; rebootAt = now + 1500; }
   if (rebootLaterAt && (int32_t)(now - rebootLaterAt) >= 0) { rebootLaterAt = 0; rebootAt = now; }
   if (sleepAt && (int32_t)(now - sleepAt) >= 0) { sleepAt = 0; goDeepSleep(); }
+  powerTick(now);
+  lowBatteryTick(now);
   if (rebootAt && now > rebootAt) { oledMsg("Restarting..."); delay(200); ESP.restart(); }
 
   handleButton();

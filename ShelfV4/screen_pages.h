@@ -223,8 +223,8 @@ static void drawTempPage() {
   else snprintf(b, sizeof b, "Up %uh %um", (unsigned)(up / 60), (unsigned)(up % 60));
   oled.setFont(u8g2_font_5x7_tf);
   oled.drawStr((128 - oled.getStrWidth(b)) / 2, 55, b);   // both lines in the bottom (yellow) strip
-  snprintf(b, sizeof b, "%u KB memory free", (unsigned)(ESP.getFreeHeap() / 1024));
-  oled.drawStr((128 - oled.getStrWidth(b)) / 2, 63, b);
+  snprintf(b, sizeof b, "%u KB free \xC2\xB7 %u MHz", (unsigned)(ESP.getFreeHeap() / 1024), (unsigned)getCpuFrequencyMhz());   // 80 MHz: saving power
+  oled.drawUTF8((128 - oled.getUTF8Width(b)) / 2, 63, b);
 }
 
 // ---- the carousel

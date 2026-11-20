@@ -156,6 +156,14 @@ label.l{font-size:13px;color:var(--muted)}
   </select></div>
   <div class="msg" id="scrMsg"></div>
 
+  <h2>Power</h2>
+  <p class="tip">Power saving makes a battery last longer. When nobody has used the board for 90 seconds (no page open, nothing playing), it slows its processor from 240 to 80 MHz, and on your home Wi-Fi it lets the Wi-Fi radio nap between the router's check-ins (not while Coms is on). Opening The Shelf brings full speed straight back. On battery, it also switches itself off before the battery runs flat (below 3.3 V) and looks again every hour; press PRG once it's charging.</p>
+  <div class="btns"><select id="pwrMode" style="flex:1;min-width:160px" onchange="setPower()">
+    <option value="on">Power saving (recommended)</option><option value="off">Always full speed</option>
+  </select></div>
+  <p class="tip">The biggest power users after that: <b>900MHz Coms</b> (its radio listens all the time; switch it off in the Coms tab when you don't need it), the board's <b>own Wi-Fi</b> (it can't nap while phones may join), and the <b>screen</b> (let it sleep after 5 minutes, above).</p>
+  <div class="msg" id="pwrMsg"></div>
+
   <div class="btns" style="margin-top:24px"><button onclick="reboot()">Restart the board</button></div>
   <p class="tip">Hold PRG for 6 seconds and let go to forget the Wi-Fi and go back to setup mode. Keep holding to 12 seconds to clear a forgotten admin password and turn read-only off.</p>
 </div>
@@ -218,6 +226,7 @@ async function load(){try{I=await fetch('/api/board/info').then(r=>r.json())}cat
   $('#backHome').style.display=I.hotspot&&I.homeSsid?'inline-block':'none';$('#homeName').textContent=I.homeSsid;
   {const tz=-new Date().getTimezoneOffset();if(!I.timeSet||I.tz!==tz)post('/api/board/time',{ms:Date.now(),tz}).catch(()=>{})}
   if(document.activeElement!==$('#scrMode'))$('#scrMode').value=I.scrSleep?'sleep':'on';
+  if(document.activeElement!==$('#pwrMode'))$('#pwrMode').value=I.pwrSave===false?'off':'on';
   if(document.activeElement!==$('#host'))$('#host').value=I.host;
   $('#hostShow').textContent='http://'+I.host+'.local';
   $('#storeTip').innerHTML=I.storage==='microSD card'
@@ -236,6 +245,7 @@ async function saveHost(){try{const j=await post('/api/board/settings',{host:$('
 async function deepSleep(){const m=+$('#sleepFor').value;
   if(!confirm('Put the board into deep sleep'+(m?' for '+(m>=60?m/60+' hour'+(m>60?'s':''):m+' min'):'')+'? It stops answering until it wakes (press PRG to wake it sooner).'))return;
   try{await post('/api/board/sleep',{minutes:m});$('#sleepMsg').textContent='Going to sleep… press PRG to wake it'+(m?', or it wakes by itself.':'.')}catch(e){$('#sleepMsg').textContent=e.message;$('#sleepMsg').className='msg err'}}
+async function setPower(){try{await post('/api/board/powersave',{on:$('#pwrMode').value==='on'});$('#pwrMsg').textContent='Saved.'}catch(e){$('#pwrMsg').textContent=e.message;$('#pwrMsg').className='msg err'}}
 async function setScreen(){try{await post('/api/board/screen',{sleep:$('#scrMode').value==='sleep'});$('#scrMsg').textContent='Saved.'}catch(e){$('#scrMsg').textContent=e.message;$('#scrMsg').className='msg err'}}
 async function reboot(){if(!confirm('Restart the board?'))return;await post('/api/board/reboot');$('#wMsg').textContent='Restarting… give it 15 seconds.'}
 // ---- microSD backup / restore ----

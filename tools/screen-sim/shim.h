@@ -17,6 +17,7 @@ static int fake_gettimeofday(struct timeval* tv, void*) { tv->tv_sec = FAKE_NOW;
 #define time fake_time
 #define gettimeofday fake_gettimeofday
 static float temperatureRead() { return 47.2f; }
+static uint32_t getCpuFrequencyMhz() { return 80; }
 struct { uint32_t getFreeHeap() { return 118 * 1024; } } ESP;
 
 class String {

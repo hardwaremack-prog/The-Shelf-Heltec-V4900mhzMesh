@@ -219,6 +219,10 @@ The **Heltec V4** card at the bottom of The Shelf's sidebar opens the board's se
 
 *Screenshots use sample files and messages.*
 
+## Power saving
+
+On by default (board settings page, **Power**). When nobody has used the board for 90 seconds (no page open, nothing streaming or updating), the CPU drops from 240 to 80 MHz, and on a home Wi-Fi the Wi-Fi radio naps between the router's beacons (not while Coms is on, since boards hear each other over 2.4 GHz only while it listens). The first web request brings full speed straight back; the CPU temperature screen page shows the speed. On battery, the board also goes into deep sleep before the battery runs flat (below 3.3 V for two minutes), waking every hour to look again, or when PRG is pressed. The rest of the power goes to 900MHz Coms (its radio listens all the time), the board's own Wi-Fi (it can't nap while phones may join) and the screen.
+
 ## Folder locks
 
 The same folder locks as The Shelf on a computer: put chosen shelves (say Pictures) and tools (Notes, Docs, Sheets, Slides, Draw, Messages) behind a **viewing password**. Anyone else has to enter it to look, for 2 hours at a time, and locked folders are always read-only for them. On a board, the **admin** is the host: set an admin password on the board's settings page and unlock that browser as the admin, then use **Folder locks…** and the **Read-only password** switch in The Shelf's sidebar. Card backups are admin-only while any lock is on. Clearing the admin password with the button also turns the locks off.

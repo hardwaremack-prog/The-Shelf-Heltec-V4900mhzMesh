@@ -221,7 +221,7 @@ The **Heltec V4** card at the bottom of The Shelf's sidebar opens the board's se
 
 ## Power saving
 
-On by default (board settings page, **Power**). When nobody has used the board for 90 seconds (no page open, nothing streaming or updating), the CPU drops from 240 to 80 MHz, and on a home Wi-Fi the Wi-Fi radio naps between the router's beacons (not while Coms is on, since boards hear each other over 2.4 GHz only while it listens). The first web request brings full speed straight back; the CPU temperature screen page shows the speed. On battery, the board also goes into deep sleep before the battery runs flat (below 3.3 V for two minutes), waking every hour to look again, or when PRG is pressed. The rest of the power goes to 900MHz Coms (its radio listens all the time), the board's own Wi-Fi (it can't nap while phones may join) and the screen.
+On by default (board settings page, **Power**). When nobody has used the board for 90 seconds (no page open, nothing streaming or updating), the CPU drops from 240 to 80 MHz, and on a home Wi-Fi the Wi-Fi radio goes into its deepest modem sleep, waking for every third router beacon (the first page after a quiet spell can take a moment longer) (not while Coms is on, since boards hear each other over 2.4 GHz only while it listens). The first web request brings full speed straight back; the CPU temperature screen page shows the speed. On battery, the board also goes into deep sleep before the battery runs flat (below 3.3 V for two minutes), waking every hour to look again, or when PRG is pressed. The rest of the power goes to 900MHz Coms (its radio listens all the time), the board's own Wi-Fi (it can't nap while phones may join) and the screen.
 
 ## Folder locks
 

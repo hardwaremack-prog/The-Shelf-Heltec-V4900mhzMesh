@@ -157,7 +157,7 @@ label.l{font-size:13px;color:var(--muted)}
   <div class="msg" id="scrMsg"></div>
 
   <h2>Power</h2>
-  <p class="tip">Power saving makes a battery last longer. When nobody has used the board for 90 seconds (no page open, nothing playing), it slows its processor from 240 to 80 MHz, and on your home Wi-Fi it lets the Wi-Fi radio nap between the router's check-ins (not while Coms is on). Opening The Shelf brings full speed straight back. On battery, it also switches itself off before the battery runs flat (below 3.3 V) and looks again every hour; press PRG once it's charging.</p>
+  <p class="tip">Power saving makes a battery last longer. When nobody has used the board for 90 seconds (no page open, nothing playing), it slows its processor from 240 to 80 MHz, and on your home Wi-Fi the Wi-Fi radio goes into its low-power mode, waking only every third time the router checks in (not while Coms is on). The first page after a quiet spell can take a moment longer to open. Opening The Shelf brings full speed straight back. On battery, it also switches itself off before the battery runs flat (below 3.3 V) and looks again every hour; press PRG once it's charging.</p>
   <div class="btns"><select id="pwrMode" style="flex:1;min-width:160px" onchange="setPower()">
     <option value="on">Power saving (recommended)</option><option value="off">Always full speed</option>
   </select></div>

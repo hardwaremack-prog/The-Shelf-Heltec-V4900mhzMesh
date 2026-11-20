@@ -423,8 +423,8 @@ static void goDeepSleep() {
 
 // ------------------------------------------------------------ power saving
 // Nobody using the board (no web requests for 90 seconds, nothing streaming or updating):
-// the CPU drops from 240 to 80 MHz, and on a home Wi-Fi the Wi-Fi radio naps between the
-// router's beacons (not while Coms is on: boards talking over 2.4 GHz need it listening).
+// the CPU drops from 240 to 80 MHz, and on a home Wi-Fi the Wi-Fi radio sleeps, waking only for
+// every third of the router's beacons (not while Coms is on: boards talking over 2.4 GHz need it listening).
 // The first request brings full speed straight back. On its own Wi-Fi the radio has to stay
 // awake for the phones joined to it, so there it's the CPU only.
 static bool wifiNap = false;
@@ -438,7 +438,9 @@ static void powerTick(uint32_t now) {
     slowNow = true;
   }
   bool nap = slowNow && staOK && !apActive && !comsOn();
-  if (nap != wifiNap) { WiFi.setSleep(nap); wifiNap = nap; }
+  // napping: the deepest Wi-Fi sleep, waking for every third router beacon (~0.3 s), so the first
+  // page load after a quiet spell can take a moment longer; then it's wide awake again
+  if (nap != wifiNap) { WiFi.setSleep(nap ? WIFI_PS_MAX_MODEM : WIFI_PS_NONE); wifiNap = nap; }
 }
 // A battery run flat hurts it: below 3.3 V for two minutes (on battery, not USB), the board says
 // so and goes into deep sleep, waking every hour to look again (or when PRG is pressed).

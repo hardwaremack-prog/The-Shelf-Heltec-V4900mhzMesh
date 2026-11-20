@@ -813,28 +813,63 @@
   };
 })();
 
-// ---- Home page weather, the board's way ----
+// ---- Weather, the board's way (as TidyOS does it) ----
 // The Shelf asks the browser where it is, but browsers only answer secure (https) pages and a
-// board is plain http, so the weather never showed. The board knows where it is (from its
-// settings page, or from your internet address) and answers /api/weather without one.
+// board is plain http, so the Home page's weather never showed. Here the browser does the
+// fetching instead, over https: where the board is (its settings page, or worked out from the
+// internet address), then the weather from Open-Meteo, shown on Home and handed to the board
+// for its screen (the 4-day temperature graph). Every 30 minutes while The Shelf is open.
 (function () {
-  if (typeof loadWeatherWidget !== 'function') return;
-  window.loadWeatherWidget = loadWeatherWidget = async function () {
-    const pill = document.getElementById('weatherPill');
-    if (!pill) return;
-    const show = data => {
-      const p = document.getElementById('weatherPill');
-      if (!p) return;
-      p.innerHTML = `${data.icon} <strong>${data.tempF}&deg;F</strong> ${escapeHtml(data.condition)}`;
-      p.title = `${data.tempC}°C — ${escapeHtml(data.condition)}`;
+  const WMO = { 0: ['Clear sky', '☀️'], 1: ['Mainly clear', '🌤️'], 2: ['Partly cloudy', '⛅'], 3: ['Overcast', '☁️'], 45: ['Fog', '🌫️'], 48: ['Freezing fog', '🌫️'],
+    51: ['Light drizzle', '🌦️'], 53: ['Drizzle', '🌦️'], 55: ['Heavy drizzle', '🌧️'], 56: ['Light freezing drizzle', '🌧️'], 57: ['Freezing drizzle', '🌧️'],
+    61: ['Light rain', '🌧️'], 63: ['Rain', '🌧️'], 65: ['Heavy rain', '🌧️'], 66: ['Light freezing rain', '🌧️'], 67: ['Freezing rain', '🌧️'],
+    71: ['Light snow', '🌨️'], 73: ['Snow', '🌨️'], 75: ['Heavy snow', '❄️'], 77: ['Snow grains', '🌨️'], 80: ['Light rain showers', '🌦️'],
+    81: ['Rain showers', '🌧️'], 82: ['Heavy rain showers', '⛈️'], 85: ['Light snow showers', '🌨️'], 86: ['Heavy snow showers', '❄️'],
+    95: ['Thunderstorm', '⛈️'], 96: ['Thunderstorm with hail', '⛈️'], 99: ['Severe thunderstorm', '⛈️'] };
+  let now = null, at = 0;
+  const j = u => fetch(u, { cache: 'no-store' }).then(r => { if (!r.ok) throw r.status; return r.json(); });
+  async function where() {
+    try { const b = await j('/api/board/location'); if (b.lat != null) return { lat: b.lat, lon: b.lon, fromBoard: true }; } catch (e) {}
+    const tries = [['https://ipwho.is/', x => x.success !== false && x.latitude != null ? { lat: x.latitude, lon: x.longitude, place: [x.city, x.region].filter(Boolean).join(', ') } : null],
+      ['https://ipapi.co/json/', x => x.latitude != null ? { lat: x.latitude, lon: x.longitude, place: [x.city, x.region].filter(Boolean).join(', ') } : null],
+      ['http://ip-api.com/json/?fields=status,city,regionName,lat,lon', x => x.status === 'success' ? { lat: x.lat, lon: x.lon, place: [x.city, x.regionName].filter(Boolean).join(', ') } : null]];
+    for (const [u, f] of tries) { try { const g = f(await j(u)); if (g) return g; } catch (e) {} }
+    return null;
+  }
+  async function refresh() {
+    const g = await where();
+    if (!g) return false;
+    const w = await j(`https://api.open-meteo.com/v1/forecast?latitude=${g.lat}&longitude=${g.lon}&current=temperature_2m,weather_code,is_day&hourly=temperature_2m&past_days=4&forecast_days=1&temperature_unit=fahrenheit&timeformat=unixtime`);
+    now = { f: w.current.temperature_2m, code: w.current.weather_code, day: w.current.is_day };
+    at = Date.now();
+    fetch('/api/board/wxdata', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ lat: g.fromBoard ? null : g.lat, lon: g.fromBoard ? null : g.lon, place: g.place || '', time: w.hourly.time, temp: w.hourly.temperature_2m, now }) }).catch(() => {});
+    return true;
+  }
+  function show() {
+    const p = document.getElementById('weatherPill');
+    if (!p || !now) return;
+    const [label, icon0] = WMO[now.code] || ['', '🌡️'];
+    const icon = now.code <= 1 && !now.day ? '🌙' : icon0;
+    p.innerHTML = `${icon} <strong>${Math.round(now.f)}&deg;F</strong> ${escapeHtml(label)}`;
+    p.title = `${Math.round((now.f - 32) * 5 / 9)}°C — ${label}`;
+  }
+  async function tick() { try { if (await refresh()) show(); } catch (e) {} }
+  if (typeof loadWeatherWidget === 'function') {
+    window.loadWeatherWidget = loadWeatherWidget = async function () {
+      if (now && Date.now() - at < 30 * 60000) { show(); return; }
+      try {
+        if (!(await refresh())) throw 0;
+        show();
+      } catch (e) {                                   // this browser can't reach the internet: ask the board
+        try {
+          const d = await j('/api/weather');
+          const p = document.getElementById('weatherPill');
+          if (p) { p.innerHTML = `${d.icon} <strong>${d.tempF}&deg;F</strong> ${escapeHtml(d.condition)}`; p.title = `${d.tempC}°C — ${d.condition}`; }
+        } catch (e2) { const p = document.getElementById('weatherPill'); if (p) p.remove(); }
+      }
     };
-    try {
-      const res = await fetch('/api/weather');
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Weather unavailable.');
-      show(data);
-    } catch {
-      const p = document.getElementById('weatherPill'); if (p) p.remove();
-    }
-  };
+  }
+  setTimeout(tick, 4000);
+  setInterval(tick, 30 * 60000);
 })();

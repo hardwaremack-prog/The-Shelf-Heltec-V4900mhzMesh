@@ -83,5 +83,5 @@ static int wxHistoryCopy(float* out, int max, uint32_t* startUtc) {
   if (startUtc) *startUtc = (uint32_t)(FAKE_NOW / 3600 * 3600) - (n - 1) * 3600;
   return n;
 }
-static bool wxLocation(float& lat, float& lon) { lat = 42.6f; lon = -82.6f; return true; }
+static bool wxLocation(float& lat, float& lon) { lat = 42.33f; lon = -83.05f; return true; }
 static void screenWake() {}

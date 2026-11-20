@@ -260,13 +260,20 @@ static void drawEarthPage() {
     }
   }
   int sx = (int)lroundf((subLon + 180) * 128 / 360), sy = (int)lroundf((WORLD_TOP - decl * 180 / (float)M_PI) * 64 / (WORLD_TOP - WORLD_BOTTOM));
-  oled.setDrawColor(0); oled.drawDisc(sx, sy, 4); oled.setDrawColor(1);
-  oled.drawCircle(sx, sy, 3); oled.drawDisc(sx, sy, 1);                      // the sun
+  // the sun: a dot with rays (where it's straight overhead right now)
+  oled.setDrawColor(0); oled.drawDisc(sx, sy, 6); oled.setDrawColor(1);
+  oled.drawDisc(sx, sy, 2);
+  for (int k = 0; k < 8; k++) {
+    float a = k * (float)M_PI / 4, c = cosf(a), d = sinf(a);
+    oled.drawLine(sx + (int)lroundf(c * 4), sy + (int)lroundf(d * 4), sx + (int)lroundf(c * 6), sy + (int)lroundf(d * 6));
+  }
+  // here: a target that flashes between a ring and a filled spot, so it's easy to find
   float hl, ho;
-  if (wxLocation(hl, ho) && (millis() / 500) % 2) {                         // here, blinking
+  if (wxLocation(hl, ho)) {
     int hx = (int)lroundf((ho + 180) * 128 / 360), hy = (int)lroundf((WORLD_TOP - hl) * 64 / (WORLD_TOP - WORLD_BOTTOM));
-    oled.setDrawColor(0); oled.drawBox(hx - 2, hy - 2, 5, 5); oled.setDrawColor(1);
-    oled.drawHLine(hx - 2, hy, 5); oled.drawVLine(hx, hy - 2, 5);
+    oled.setDrawColor(0); oled.drawDisc(hx, hy, 4); oled.setDrawColor(1);
+    if ((millis() / 400) % 2) oled.drawCircle(hx, hy, 3); else oled.drawDisc(hx, hy, 2);
+    oled.drawPixel(hx, hy);
   }
   struct tm t; localNow(&t);                                               // the time, bottom left
   char b[16]; snprintf(b, sizeof b, "%d:%02d %s", t.tm_hour % 12 ? t.tm_hour % 12 : 12, t.tm_min, t.tm_hour < 12 ? "AM" : "PM");

@@ -456,7 +456,7 @@ static void powerTick(uint32_t now) {
     setCpuFrequencyMhz(80);
     slowNow = true;
   }
-  bool nap = slowNow && staOK && !apActive && !comsOn();
+  bool nap = slowNow && staOK && !apActive && !comsWifiOn();   // (Meshed Comms on 900 MHz only: the Wi-Fi can still nap)
   // napping: the radio sleeps between the router's beacons and wakes for every one, so it still
   // hears everything addressed to it; full speed again with the first request
   // (WIFI_PS_MAX_MODEM, which skips beacons, made the board miss the network's "who has this

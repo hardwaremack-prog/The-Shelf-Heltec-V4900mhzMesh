@@ -187,7 +187,7 @@
   async function refresh(force) {
     if (!viewing()) { clearInterval(timer); timer = null; return; }
     let c; try { c = await fetch('/api/coms').then(r => r.json()); } catch { return; }
-    const sig = JSON.stringify([c.enabled, c.radio, c.receipts, c.log.length, c.log.length && c.log[c.log.length - 1].id, c.neighbors.length, c.error, c.heard, c.relayed, c.synced, c.receivedBy,
+    const sig = JSON.stringify([c.enabled, c.radio, c.receipts, c.bandLora, c.bandWifi, c.lora, c.wifi, c.log.length, c.log.length && c.log[c.log.length - 1].id, c.neighbors.length, c.error, c.heard, c.relayed, c.synced, c.receivedBy,
       (c.devices || []).map(d => [d.node, d.name, d.hops, d.batt, d.ro, d.admin, Math.floor((Date.now() - d.at) / 60000)])]);
     if (!force && sig === last) return;
     last = sig;
@@ -221,8 +221,9 @@
           ${c.enabled ? `
           <div class="coms-chips">
             <span class="coms-chip">You are <b>${escapeHtml(c.name)}</b></span>
-            ${c.hasLora === false ? '' : `<span class="coms-chip">${c.freq.toFixed(1)} MHz${c.lora ? '' : ' (off)'}</span>`}
-            <span class="coms-chip" title="Boards hear each other over 2.4 GHz only on the same Wi-Fi channel">2.4 GHz${c.wifi ? ' · channel ' + c.channel : ' (off)'}</span>
+            ${c.hasLora === false ? `<span class="coms-chip" title="Boards hear each other over 2.4 GHz only on the same Wi-Fi channel">2.4 GHz${c.wifi ? ' · channel ' + c.channel : ' (off)'}</span>` : `
+            <button class="coms-chip coms-band ${c.bandLora !== false ? 'on' : ''}" id="comsBandLora" title="Tap to switch the 900 MHz LoRa radio ${c.bandLora !== false ? 'off' : 'on'}">${c.bandLora !== false ? '\u2713' : '\u2715'} ${c.freq.toFixed(1)} MHz${c.bandLora !== false && !c.lora ? ' (starting)' : ''}</button>
+            <button class="coms-chip coms-band ${c.bandWifi !== false ? 'on' : ''}" id="comsBandWifi" title="Tap to switch 2.4 GHz ${c.bandWifi !== false ? 'off' : 'on'}. Boards hear each other over 2.4 GHz only on the same Wi-Fi channel">${c.bandWifi !== false ? '\u2713' : '\u2715'} 2.4 GHz${c.bandWifi !== false && c.wifi ? ' \u00b7 channel ' + c.channel : ''}</button>`}
             <span class="coms-chip">Heard <b>${c.heard}</b></span>
             <span class="coms-chip">Relayed <b>${c.relayed}</b></span>
             <span class="coms-chip">Caught up <b>${c.synced}</b></span>
@@ -258,6 +259,14 @@
     const logEl = content.querySelector('#comsLog');
     if (logEl) logEl.scrollTop = logEl.scrollHeight;
     content.querySelector('#comsToggle').addEventListener('change', async e => { await post('/api/coms/toggle', { on: e.target.checked }); last = ''; setTimeout(() => refresh(true), 400); });
+    [['#comsBandLora', 'lora', c.bandLora !== false], ['#comsBandWifi', 'wifi', c.bandWifi !== false]].forEach(([id, key, on]) => {
+      const b = content.querySelector(id);
+      if (b) b.addEventListener('click', async () => {
+        const r = await post('/api/coms/settings', { [key]: !on });
+        if (!r.ok) { const j = await r.json().catch(() => ({})); alert(j.error || 'That didn\u2019t work.'); }
+        last = ''; setTimeout(() => refresh(true), 400);
+      });
+    });
     const input = content.querySelector('#comsInput');
     if (input) {
       input.value = draft;

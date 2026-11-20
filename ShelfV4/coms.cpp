@@ -82,6 +82,7 @@ static Preferences cprefs;
 static SemaphoreHandle_t comsLock;
 
 static bool enabled = false, radioUp = false;
+static volatile bool bandLora = true, bandNow = true;   // each band can be switched off on its own (Heltec)
 // "Received" receipts: when on, this board answers each message it hears with a short
 // receipt that floods back to the sender, so the sender sees who got it.
 static bool receiptsOn = true;
@@ -191,6 +192,7 @@ static uint8_t wifiChannel() { uint8_t ch = 0; wifi_second_chan_t sc; esp_wifi_g
 // For the OLED
 String comsLastLine; uint32_t comsLastAt = 0;
 bool comsOn() { return enabled && (radioUp || nowUp); }
+bool comsWifiOn() { return enabled && bandNow; }
 
 static String hex8(uint32_t v) { char b[9]; snprintf(b, sizeof b, "%08x", v); return b; }
 
@@ -618,9 +620,11 @@ static void comsTask(void*) {
       linked = false;
       vTaskDelay(pdMS_TO_TICKS(200)); continue;
     }
-    if (!nowUp && (int32_t)(millis() - nowRetryAt) >= 0) { nowUp = nowStart(); if (!nowUp) nowRetryAt = millis() + 5000; }
+    if (!bandNow && nowUp) nowStop();
+    if (bandNow && !nowUp && (int32_t)(millis() - nowRetryAt) >= 0) { nowUp = nowStart(); if (!nowUp) nowRetryAt = millis() + 5000; }
 #ifndef SHELF_NO_RADIO
-    if (!radioUp && (int32_t)(millis() - radioRetryAt) >= 0) { radioUp = radioStart(); if (!radioUp) radioRetryAt = millis() + 5000; }
+    if (!bandLora && radioUp) radioStop();
+    if (bandLora && !radioUp && (int32_t)(millis() - radioRetryAt) >= 0) { radioUp = radioStart(); if (!radioUp) radioRetryAt = millis() + 5000; }
 #endif
     if (!radioUp && !nowUp) { vTaskDelay(pdMS_TO_TICKS(500)); continue; }
     if (!linked) {
@@ -725,6 +729,10 @@ void comsBegin() {
   level = constrain(cprefs.getInt("level", 1), 0, 2);
   enabled = cprefs.getBool("on", false);
   receiptsOn = cprefs.getBool("receipts", true);
+  bandLora = cprefs.getBool("lora", true); bandNow = cprefs.getBool("now", true);
+#ifdef SHELF_NO_RADIO
+  bandNow = true;                                    // 2.4 GHz is all a plain ESP32 has
+#endif
   loadLog();
   for (auto& l : logRam) if (l.indexOf("\"mine\":true") >= 0) {     // my messages, so receipts match
     int p = l.indexOf("\"id\":\""); if (p >= 0) myIds.push_back(strtoul(l.substring(p + 6, p + 14).c_str(), nullptr, 16));
@@ -746,7 +754,7 @@ bool handleComsApi(AsyncWebServerRequest* r, const String& url, WebRequestMethod
   if (!url.startsWith("/api/coms")) return false;
   if (url == "/api/coms" && m == HTTP_GET) {
     String s = String("{\"enabled\":") + (enabled ? "true" : "false") + ",\"radio\":" + ((radioUp || nowUp) ? "true" : "false") +
-      ",\"lora\":" + (radioUp ? "true" : "false") + ",\"wifi\":" + (nowUp ? "true" : "false") + ",\"channel\":" + wifiChannel() +
+      ",\"lora\":" + (radioUp ? "true" : "false") + ",\"wifi\":" + (nowUp ? "true" : "false") + ",\"bandLora\":" + (bandLora ? "true" : "false") + ",\"bandWifi\":" + (bandNow ? "true" : "false") + ",\"channel\":" + wifiChannel() +
 #ifdef SHELF_NO_RADIO
       ",\"hasLora\":false" +
 #else
@@ -896,6 +904,13 @@ bool handleComsApi(AsyncWebServerRequest* r, const String& url, WebRequestMethod
     if (nm.length()) { myName = nm.substring(0, MAX_NAME); cprefs.putString("name", myName); }
     if (b["level"].is<int>()) { level = constrain(b["level"].as<int>(), 0, 2); cprefs.putInt("level", level); }
     if (b["receipts"].is<bool>()) { receiptsOn = b["receipts"].as<bool>(); cprefs.putBool("receipts", receiptsOn); }
+#ifndef SHELF_NO_RADIO
+    if (b["lora"].is<bool>() || b["wifi"].is<bool>()) {             // the two bands, each on or off
+      bool lo = b["lora"].is<bool>() ? b["lora"].as<bool>() : (bool)bandLora, wi = b["wifi"].is<bool>() ? b["wifi"].as<bool>() : (bool)bandNow;
+      if (!lo && !wi) { sendErr(r, 400, "Keep one band on, or switch Meshed Comms off."); return true; }
+      bandLora = lo; bandNow = wi; cprefs.putBool("lora", lo); cprefs.putBool("now", wi);
+    }
+#endif
     sendJson(r, 200, "{\"ok\":true,\"name\":\"" + jsonEsc(myName) + "\",\"level\":" + level + "}");
     return true;
   }

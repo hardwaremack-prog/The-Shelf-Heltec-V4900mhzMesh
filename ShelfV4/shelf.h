@@ -170,6 +170,7 @@ void messagingBegin();
 void comsBegin();
 bool handleComsApi(AsyncWebServerRequest* r, const String& url, WebRequestMethod m);
 bool comsOn();
+bool comsWifiOn();      // Meshed Comms using 2.4 GHz (the Wi-Fi radio has to keep listening)
 extern String comsLastLine; extern uint32_t comsLastAt;
 void messagingLoop();
 void musicMetaLoop();

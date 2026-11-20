@@ -225,6 +225,10 @@ The **Heltec V4** card at the bottom of The Shelf's sidebar opens the board's se
 
 On by default (board settings page, **Power**). When nobody has used the board for 90 seconds (no page open, nothing streaming or updating), the CPU drops from 240 to 80 MHz, and on a home Wi-Fi the Wi-Fi radio sleeps between the router's beacons, waking for each one (not while Coms is on, since boards hear each other over 2.4 GHz only while it listens). The first web request brings full speed straight back; the CPU temperature screen page shows the speed. On battery, the board also goes into deep sleep before the battery runs flat (below 3.3 V for two minutes), waking every hour to look again, or when PRG is pressed. The rest of the power goes to Meshed Comms (its radio listens all the time), the board's own Wi-Fi (it can't nap while phones may join) and the screen.
 
+## Meshed Comms bands (Heltec V3 / V4)
+
+A Heltec talks on two bands at once: 900 MHz LoRa (long range) and 2.4 GHz (ESP-NOW, which reaches the plain ESP32 boards). In the Meshed Comms tab, the **915.0 MHz** and **2.4 GHz** chips are switches: tap one to turn that band off or back on (one has to stay on). With 2.4 GHz off, the board's Wi-Fi can save power again while it's idle.
+
 ## Folder locks
 
 The same folder locks as The Shelf on a computer: put chosen shelves (say Pictures) and tools (Notes, Docs, Sheets, Slides, Draw, Messages) behind a **viewing password**. Anyone else has to enter it to look, for 2 hours at a time, and locked folders are always read-only for them. On a board, the **admin** is the host: set an admin password on the board's settings page and unlock that browser as the admin, then use the **Read control** switch and **Read control: shelves…** at the top of The Shelf's sidebar (on a board, folder locks are called Read control). Card backups are admin-only while any lock is on. Clearing the admin password with the button also turns the locks off.

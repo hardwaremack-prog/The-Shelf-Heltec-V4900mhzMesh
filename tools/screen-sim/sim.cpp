@@ -29,6 +29,8 @@ static void shot(int p, uint32_t el, const char* name) {
     case P_AFFIRM: drawAffirmPage(el); break;
     case P_COLOR: drawColorPage(el); break;
     case P_TEMP: drawTempPage(); break;
+    case P_EARTH: drawEarthPage(); break;
+    case P_WXGRAPH: drawWxGraphPage(); break;
     default: drawStatusPage(); break;
   }
   dump(name);
@@ -43,6 +45,8 @@ int main() {
   shot(P_AFFIRM, 0, "affirmation.txt");
   shot(P_CLOCK, 100, "clock.txt");
   shot(P_COLOR, 0, "color.txt");
+  fakeMillis = 0; shot(P_EARTH, 0, "earth.txt");
+  shot(P_WXGRAPH, 0, "outside.txt");
   fakeMillis = (2 * 24 * 60 + 3 * 60 + 12) * 60000u;   // up 2 days, 3 hours
   shot(P_TEMP, 0, "temperature.txt");
   return 0;

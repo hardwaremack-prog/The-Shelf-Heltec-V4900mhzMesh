@@ -192,13 +192,15 @@ If the board is set to join your home Wi-Fi but can't find it at power-up, it st
 
 While it's on, the screen takes turns through these pages, about 6 to 10 seconds each (long text scrolls by once):
 
-![The screen's pages: status, now playing, a game opened, a picture on show, watch face, clock, today's affirmation, color of the day, CPU temperature](docs/screens/all-screens.png)
+![The screen's pages: status, now playing, a game opened, a picture on show, watch face, clock, sunlit earth, outside temperature, today's affirmation, color of the day, CPU temperature](docs/screens/all-screens.png)
 
 *Drawn by the firmware's own screen code with the real U8g2 library and fonts (`tools/screen-sim/render.sh`), shown on a two-color screen plugged in line on an ESP32: the bottom strip is yellow.*
 
 - **Status:** as above. On a screen plugged in line, little arrows point at the **BOOT** (next page) and **EN** (restart) buttons beside it.
 - **Now playing / Playing game / Program / Watching / Picture / Reading:** whatever was just opened on the board: a song, a game, a program, a video, a picture in the slideshow, or a book. It takes over the screen for 30 seconds (wakes it, too), with the name scrolling, then stays in the rotation for 10 minutes.
 - **Watch face** with a sweeping second hand and the date, and a big **clock**. These need the time: from the internet, or from the first browser that opens The Shelf, which also tells the board its time zone.
+- **Sunlit earth:** the world map with day and night as they are right now (land in daylight solid, twilight half-lit, night dim, the day/night line dotted across the oceans), the sun over the spot where it's straight overhead, and a blinking cross where the board is.
+- **Outside, last 4 days:** the hourly outside temperature with a dashed freezing line (32 °F), each day's name, and the low and high. The board learns where it is from The Shelf's Home-page weather and fetches the hours from Open-Meteo once an hour, so this page needs a home Wi-Fi with internet.
 - **Today's affirmation** and the **color of the day**: the same ones The Shelf's Home page shows that day.
 - **CPU temperature** in °C and °F, how long the board has been on, and free memory.
 

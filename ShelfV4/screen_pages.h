@@ -6,8 +6,9 @@
 // that opens The Shelf). A short press of the button shows the next page.
 // Included once, from main.cpp, after drawStatusPage().
 #include "daily_gen.h"
+#include "world_map.h"
 
-enum { P_STATUS, P_WATCH, P_NOW, P_AFFIRM, P_CLOCK, P_COLOR, P_TEMP, P_COUNT };
+enum { P_STATUS, P_WATCH, P_NOW, P_EARTH, P_AFFIRM, P_CLOCK, P_WXGRAPH, P_COLOR, P_TEMP, P_COUNT };
 static int page = P_STATUS;
 static uint32_t pageAt = 0, pageLen = 10000;
 static volatile bool nextPageNow = false;
@@ -227,11 +228,115 @@ static void drawTempPage() {
   oled.drawUTF8((128 - oled.getUTF8Width(b)) / 2, 63, b);
 }
 
+// The sunlit earth: the world map with day and night as they are right now. Land in daylight is
+// solid, in twilight half-lit, at night dim; the line between day and night is dotted across the
+// oceans; the sun sits over the spot where it's straight overhead; where the board is blinks.
+static void sunPosition(time_t t, float& decl, float& subLon) {
+  struct tm g; gmtime_r(&t, &g);
+  float hours = g.tm_hour + g.tm_min / 60.0f + g.tm_sec / 3600.0f;
+  float y = 2 * (float)M_PI / 365 * (g.tm_yday + (hours - 12) / 24);       // NOAA's approximation
+  decl = 0.006918f - 0.399912f * cosf(y) + 0.070257f * sinf(y) - 0.006758f * cosf(2 * y) + 0.000907f * sinf(2 * y)
+       - 0.002697f * cosf(3 * y) + 0.00148f * sinf(3 * y);
+  float eqt = 229.18f * (0.000075f + 0.001868f * cosf(y) - 0.032077f * sinf(y) - 0.014615f * cosf(2 * y) - 0.040849f * sinf(2 * y));
+  subLon = -15.0f * (hours - 12 + eqt / 60);                                // degrees, east positive
+  while (subLon < -180) subLon += 360; while (subLon > 180) subLon -= 360;
+}
+static void drawEarthPage() {
+  float decl, subLon; sunPosition(time(nullptr), decl, subLon);
+  float sd = sinf(decl), cd = cosf(decl);
+  static float cosCol[128];
+  for (int x = 0; x < 128; x++) cosCol[x] = cosf(((-180 + (x + 0.5f) * 360 / 128) - subLon) * (float)M_PI / 180);
+  for (int y = 0; y < 64; y++) {
+    float lat = (90 - (y + 0.5f) * 180 / 64) * (float)M_PI / 180, a = sinf(lat) * sd, b = cosf(lat) * cd;
+    for (int x = 0; x < 128; x++) {
+      float z = a + b * cosCol[x];                                         // the sun's height there (sine)
+      bool land = (WORLD_MAP[y][x >> 3] >> (7 - (x & 7))) & 1;
+      bool on;
+      if (land) on = z > 0.05f ? true : z > -0.10f ? ((x + y) & 1) : (!(x & 1) && !(y & 1));   // day, twilight, night
+      else on = fabsf(z) < 0.025f && ((x + y) % 3 == 0);                  // the day/night line, over the sea
+      if (on) oled.drawPixel(x, y);
+    }
+  }
+  int sx = (int)lroundf((subLon + 180) * 128 / 360), sy = (int)lroundf((90 - decl * 180 / (float)M_PI) * 64 / 180);
+  oled.setDrawColor(0); oled.drawDisc(sx, sy, 4); oled.setDrawColor(1);
+  oled.drawCircle(sx, sy, 3); oled.drawDisc(sx, sy, 1);                      // the sun
+  float hl, ho;
+  if (wxLocation(hl, ho) && (millis() / 500) % 2) {                         // here, blinking
+    int hx = (int)lroundf((ho + 180) * 128 / 360), hy = (int)lroundf((90 - hl) * 64 / 180);
+    oled.setDrawColor(0); oled.drawBox(hx - 2, hy - 2, 5, 5); oled.setDrawColor(1);
+    oled.drawHLine(hx - 2, hy, 5); oled.drawVLine(hx, hy - 2, 5);
+  }
+  struct tm t; localNow(&t);                                               // the time, bottom left
+  char b[16]; snprintf(b, sizeof b, "%d:%02d %s", t.tm_hour % 12 ? t.tm_hour % 12 : 12, t.tm_min, t.tm_hour < 12 ? "AM" : "PM");
+  oled.setFont(u8g2_font_5x7_tf);
+  int w = oled.getStrWidth(b);
+  oled.setDrawColor(0); oled.drawBox(0, 55, w + 3, 9); oled.setDrawColor(1);
+  oled.drawStr(1, 63, b);
+  scrolling = true;                                                        // keep "here" blinking
+}
+
+// Outside temperature, hour by hour for the last 4 days, with the freezing line (32 °F).
+static void drawWxGraphPage() {
+  static float v[WX_HOURS]; uint32_t start = 0;
+  int n = wxHistoryCopy(v, WX_HOURS, &start);
+  if (n < 2) return;
+  float lo = v[0], hi = v[0];
+  for (int i = 1; i < n; i++) { lo = min(lo, v[i]); hi = max(hi, v[i]); }
+  float dlo = lo, dhi = hi;
+  if (lo < 45 && hi > 20) { dlo = min(dlo, 32.0f); dhi = max(dhi, 32.0f); }   // keep freezing on the graph when it's near
+  if (dhi - dlo < 10) { float m = (dhi + dlo) / 2; dlo = m - 5; dhi = m + 5; }
+  const int X0 = 16, X1 = 127, Y0 = 12, Y1 = 46;                          // the graph sits in the top (blue) part
+  auto Y = [&](float f) { return Y1 - (int)lroundf((f - dlo) * (Y1 - Y0) / (dhi - dlo)); };
+  auto X = [&](int i) { return X0 + (int)lroundf((float)i * (X1 - X0) / (WX_HOURS - 1)) + (WX_HOURS - n) * (X1 - X0) / (WX_HOURS - 1); };
+  // heading: now, top right
+  char b[40];
+  oled.setFont(u8g2_font_5x7_tf);
+  oled.drawStr(0, 7, "OUTSIDE \xB7 4 DAYS");
+  snprintf(b, sizeof b, "%.0f\xC2\xB0" "F now", v[n - 1]);
+  oled.drawUTF8(128 - oled.getUTF8Width(b), 7, b);
+  // scale: high and low at the left
+  oled.setFont(u8g2_font_4x6_tf);
+  snprintf(b, sizeof b, "%.0f", dhi); oled.drawStr(0, Y0 + 5, b);
+  snprintf(b, sizeof b, "%.0f", dlo); oled.drawStr(0, Y1, b);
+  // the freezing line, dashed, with 32 at the left
+  if (32 >= dlo && 32 <= dhi) {
+    int fy = Y(32);
+    for (int x = X0; x <= X1; x += 4) oled.drawHLine(x, fy, 2);
+    if (fy - 3 > Y0 + 6 && fy + 3 < Y1 - 5) oled.drawStr(0, fy + 3, "32");
+  }
+  // midnights: a dotted line each day, and the day's name underneath (local time)
+  long off = (long)tzMin * 60;
+  uint32_t firstLocal = start + off;
+  uint32_t mid = (firstLocal / 86400 + 1) * 86400;                         // first local midnight after the start
+  int prevX = X(0);
+  struct tm d;
+  oled.setFont(u8g2_font_5x7_tf);
+  for (;; mid += 86400) {
+    int hi_ = (int)((mid - firstLocal) / 3600);
+    int mx = hi_ < n ? X(hi_) : X(n - 1);
+    time_t dayT = (time_t)(mid - 86400); gmtime_r(&dayT, &d);              // the day that ends at this midnight
+    char nm[4]; snprintf(nm, sizeof nm, "%.3s", WDAY[d.tm_wday]);
+    int cx = (prevX + mx) / 2 - oled.getStrWidth(nm) / 2;
+    if (mx - prevX > 16) oled.drawStr(cx, 56, nm);
+    if (hi_ >= n) break;
+    for (int y = Y0; y <= Y1; y += 3) oled.drawPixel(mx, y);
+    prevX = mx;
+  }
+  // the temperature
+  for (int i = 1; i < n; i++) oled.drawLine(X(i - 1), Y(v[i - 1]), X(i), Y(v[i]));
+  oled.drawDisc(X(n - 1), Y(v[n - 1]), 1);
+  // low and high, along the bottom
+  oled.setFont(u8g2_font_4x6_tf);
+  snprintf(b, sizeof b, "lo %.0f\xB0  hi %.0f\xB0  - - freezing", lo, hi);
+  oled.drawStr((128 - oled.getStrWidth(b)) / 2, 63, b);
+}
+
 // ---- the carousel
 static bool pageReady(int p) {
   switch (p) {
     case P_NOW: return nowPlayingRecent() && npName[0];   // a song, game, program, video or picture
-    case P_WATCH: case P_CLOCK: case P_AFFIRM: case P_COLOR: return clockOK();
+    case P_WATCH: case P_CLOCK: case P_AFFIRM: case P_COLOR: case P_EARTH: return clockOK();
+    case P_WXGRAPH: { static float v[2]; return clockOK() && wxHistoryCopy(v, 2, nullptr) >= 2; }
     default: return true;
   }
 }
@@ -241,6 +346,8 @@ static uint32_t pageDuration(int p) {
     case P_WATCH: return 9000;
     case P_CLOCK: return 6000;
     case P_TEMP: return 6000;
+    case P_EARTH: return 9000;
+    case P_WXGRAPH: return 9000;
     case P_NOW: return 10000;
     case P_AFFIRM: oled.setFont(u8g2_font_helvB12_tf); return max<uint32_t>(7000, passMs(oled.getUTF8Width(todaysAffirmation())));
     case P_COLOR: oled.setFont(u8g2_font_6x10_tf); return max<uint32_t>(7000, passMs(oled.getUTF8Width(DAILY_COLOR_MEANINGS[todaysColor()])));
@@ -271,6 +378,8 @@ static void drawScreen() {
     case P_AFFIRM: drawAffirmPage(el); break;
     case P_COLOR: drawColorPage(el); break;
     case P_TEMP: drawTempPage(); break;
+    case P_EARTH: drawEarthPage(); break;
+    case P_WXGRAPH: drawWxGraphPage(); break;
     default: drawStatusPage(); break;
   }
   oled.sendBuffer();

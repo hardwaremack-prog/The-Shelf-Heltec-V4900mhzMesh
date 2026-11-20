@@ -208,7 +208,13 @@ String remoteStatusJson();
 bool remoteBoardCommand(uint8_t cmd, const String& arg, String& out);
 int batteryPercentNow();
 void screenWake();
-void screenShowing(const String& cat, const String& file);   // something opened from a shelf: show its name on the screen
+void screenShowing(const String& cat, const String& file);
+// api_tools.cpp: outside temperature for the screen (where the board is comes from the Home page's weather)
+#define WX_HOURS 96
+void wxRemember(double lat, double lon);
+bool wxLocation(float& lat, float& lon);
+int wxHistoryCopy(float* out, int max, uint32_t* startUtc);   // hourly °F, oldest first
+void wxHistoryTick();   // something opened from a shelf: show its name on the screen
 void screenSleep();
 bool screenIsOn();
 

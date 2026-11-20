@@ -75,4 +75,13 @@ static uint64_t storeTotal = 31902400512ULL, storeUsed = 9200000000ULL;
 struct IP { String toString() { return String("10.0.0.126"); } };
 struct { int RSSI() { return -52; } IP localIP() { return IP(); } IP softAPIP() { return IP(); } } WiFi;
 static bool oledOK = true, screenOn = true;
+#define WX_HOURS 96
+// four days of made-up November weather around Harsens Island, for the pictures
+static int wxHistoryCopy(float* out, int max, uint32_t* startUtc) {
+  int n = max < WX_HOURS ? max : WX_HOURS;
+  for (int i = 0; i < n; i++) { float h = (float)(WX_HOURS - n + i); out[i] = 36 + 9 * sinf((h - 10) / 24 * 2 * (float)M_PI) - h * 0.08f + 3 * sinf(h / 7); }
+  if (startUtc) *startUtc = (uint32_t)(FAKE_NOW / 3600 * 3600) - (n - 1) * 3600;
+  return n;
+}
+static bool wxLocation(float& lat, float& lon) { lat = 42.6f; lon = -82.6f; return true; }
 static void screenWake() {}

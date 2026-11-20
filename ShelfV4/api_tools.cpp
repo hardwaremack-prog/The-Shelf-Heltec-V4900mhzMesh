@@ -4,6 +4,7 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <algorithm>
+#include <Preferences.h>
 
 static const char* const COLLECTIONS[] = {"notes", "documents", "presentations", "sheets", nullptr};
 static String collDir(const String& kind) { return String(DATA_ROOT "/") + kind; }
@@ -205,6 +206,76 @@ void recordVisitor(const String& ip) {
   saveJsonFile(VISITORS_FILE, v);
 }
 
+// ------------------------------------------------------------ outside temperature, last 4 days
+// The board learns where it is from The Shelf's Home page (its weather asks with the browser's
+// location), keeps that, and once an hour (on a home Wi-Fi with internet) fetches the hourly
+// temperature for the past 4 days from Open-Meteo, for the screen's graph.
+static Preferences wxp; static bool wxpOpen = false;
+static float wxLat = NAN, wxLon = NAN;
+static float hist[WX_HOURS]; static int histN = 0; static uint32_t histStart = 0;
+static uint32_t histAt = 0; static volatile bool histBusy = false;
+static portMUX_TYPE histMux = portMUX_INITIALIZER_UNLOCKED;
+static void wxOpen() {
+  if (wxpOpen) return;
+  wxp.begin("wx", false); wxpOpen = true;
+  wxLat = wxp.getFloat("lat", NAN); wxLon = wxp.getFloat("lon", NAN);
+}
+void wxRemember(double lat, double lon) {
+  wxOpen();
+  if (!isnan(wxLat) && fabs(wxLat - lat) < 0.05 && fabs(wxLon - lon) < 0.05) return;
+  wxLat = lat; wxLon = lon; wxp.putFloat("lat", wxLat); wxp.putFloat("lon", wxLon);
+  histAt = 0;                                       // somewhere new: fetch again soon
+}
+bool wxLocation(float& lat, float& lon) { wxOpen(); lat = wxLat; lon = wxLon; return !isnan(wxLat); }
+int wxHistoryCopy(float* out, int max, uint32_t* startUtc) {
+  portENTER_CRITICAL(&histMux);
+  int n = std::min(histN, max);
+  memcpy(out, hist + (histN - n), n * sizeof(float));
+  if (startUtc) *startUtc = histStart + (histN - n) * 3600;
+  portEXIT_CRITICAL(&histMux);
+  return n;
+}
+static void wxTask(void*) {
+  char url[220];
+  snprintf(url, sizeof url, "http://api.open-meteo.com/v1/forecast?latitude=%.3f&longitude=%.3f&hourly=temperature_2m&past_days=4&forecast_days=1&temperature_unit=fahrenheit&timeformat=unixtime", wxLat, wxLon);
+  HTTPClient http; http.setTimeout(10000);
+  bool ok = false;
+  if (http.begin(url) && http.GET() == 200) {
+    JsonDocument f; f["hourly"]["time"] = true; f["hourly"]["temperature_2m"] = true;
+    JsonDocument j(&psAlloc);
+    if (!deserializeJson(j, http.getStream(), DeserializationOption::Filter(f))) {
+      JsonArray t = j["hourly"]["time"], v = j["hourly"]["temperature_2m"];
+      uint32_t now = (uint32_t)time(nullptr);
+      static float tmp[WX_HOURS + 32]; int n = 0; uint32_t first = 0;
+      for (size_t i = 0; i < t.size() && i < v.size(); i++) {
+        uint32_t ts = t[i] | 0u;
+        if (!ts || ts > now || v[i].isNull()) continue;            // past hours only
+        if (n == (int)(sizeof tmp / sizeof tmp[0])) { memmove(tmp, tmp + 1, (n - 1) * sizeof(float)); n--; first += 3600; }
+        if (!n) first = ts;
+        tmp[n++] = v[i].as<float>();
+      }
+      if (n > 12) {
+        int keep = std::min(n, WX_HOURS);
+        portENTER_CRITICAL(&histMux);
+        memcpy(hist, tmp + (n - keep), keep * sizeof(float)); histN = keep; histStart = first + (n - keep) * 3600;
+        portEXIT_CRITICAL(&histMux);
+        ok = true;
+      }
+    }
+  }
+  http.end();
+  histAt = ok ? millis() | 1 : millis() - 3300000;                  // didn't work: try again in 5 minutes
+  histBusy = false;
+  vTaskDelete(nullptr);
+}
+void wxHistoryTick() {
+  if (!staOK || histBusy || time(nullptr) < 1700000000) return;
+  wxOpen();
+  if (isnan(wxLat) || (histAt && millis() - histAt < 3600000)) return;
+  histBusy = true;
+  if (xTaskCreatePinnedToCore(wxTask, "wxhist", 8192, nullptr, 1, nullptr, 1) != pdPASS) { histBusy = false; histAt = millis() - 3300000; }
+}
+
 // ------------------------------------------------------------ Weather (Open-Meteo, cached 10 minutes)
 static String wxKey, wxData; static uint32_t wxAt = 0;
 static void weather(AsyncWebServerRequest* r) {
@@ -212,6 +283,7 @@ static void weather(AsyncWebServerRequest* r) {
   double lon = r->hasParam("lon") ? r->getParam("lon")->value().toDouble() : NAN;
   if (isnan(lat) || isnan(lon) || !r->hasParam("lat") || !r->hasParam("lon")) return sendErr(r, 400, "Missing or invalid location.");
   char key[32]; snprintf(key, sizeof key, "%.2f,%.2f", lat, lon);
+  wxRemember(lat, lon);                             // the screen's temperature graph and earth map use it
   if (wxKey == key && wxData.length() && millis() - wxAt < 600000) return sendJson(r, 200, wxData);
   if (!staOK) return sendErr(r, 502, "Couldn't reach the weather service -- the board isn't on your home Wi-Fi yet.");
   HTTPClient http;

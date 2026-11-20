@@ -149,8 +149,15 @@ label.l{font-size:13px;color:var(--muted)}
   </select><button class="pri" onclick="deepSleep()">Deep sleep</button></div>
   <div class="msg" id="sleepMsg"></div>
 
+  <h2>Location</h2>
+  <p class="tip">Where the board is: the blinking cross on the screen's earth map, and the outside-temperature graph. Until you set it here, it takes the location a browser gives The Shelf's weather, which can be a rough guess.</p>
+  <div class="card" id="locNow"><div class="empty">Loading&hellip;</div></div>
+  <div class="field" style="margin-top:8px"><input id="locQ" placeholder="Town, city or ZIP code" onkeydown="if(event.key==='Enter')locFind()"><button class="pri" onclick="locFind()">Find</button></div>
+  <div class="nets" id="locList" style="display:none"></div>
+  <div class="msg" id="locMsg"></div>
+
   <h2>Screen</h2>
-  <p class="tip">While it's on, the screen takes turns showing the board's address, a watch face, the time, today's affirmation, the color of the day, the CPU temperature, and the name of the song, game, program, video or picture that was just opened. Press PRG to skip to the next one. Opening something wakes it.</p>
+  <p class="tip">While it's on, the screen takes turns showing the board's address, a watch face, the time, the sunlit earth, the outside temperature over the last 4 days, today's affirmation, the color of the day, the CPU temperature, and the name of the song, game, program, video or picture that was just opened. Press PRG once to keep the page on for 30 seconds, or twice quickly for the next one. Opening something wakes it.</p>
   <div class="btns"><select id="scrMode" style="flex:1;min-width:160px" onchange="setScreen()">
     <option value="sleep">Sleeps after 5 minutes (PRG wakes it)</option><option value="on">Stays on</option>
   </select></div>
@@ -245,6 +252,15 @@ async function saveHost(){try{const j=await post('/api/board/settings',{host:$('
 async function deepSleep(){const m=+$('#sleepFor').value;
   if(!confirm('Put the board into deep sleep'+(m?' for '+(m>=60?m/60+' hour'+(m>60?'s':''):m+' min'):'')+'? It stops answering until it wakes (press PRG to wake it sooner).'))return;
   try{await post('/api/board/sleep',{minutes:m});$('#sleepMsg').textContent='Going to sleep… press PRG to wake it'+(m?', or it wakes by itself.':'.')}catch(e){$('#sleepMsg').textContent=e.message;$('#sleepMsg').className='msg err'}}
+async function locLoad(){let j;try{j=await fetch('/api/board/location').then(r=>r.json())}catch(e){return}
+  $('#locNow').innerHTML=`<div class="kv"><span>Location</span><span>${j.lat==null?'Not known yet':esc(j.place||(j.lat.toFixed(2)+', '+j.lon.toFixed(2)))+(j.manual?'':' (from a browser)')}</span></div>`+(j.manual?'<div class="kv"><span></span><span><button onclick="locAuto()">Go back to the browser\'s location</button></span></div>':'')}
+async function locFind(){const q=$('#locQ').value.trim();const box=$('#locList');$('#locMsg').textContent='';if(!q)return;box.style.display='block';box.innerHTML='<div class="empty">Looking…</div>';
+  let r,j;try{r=await fetch('/api/board/location/search?q='+encodeURIComponent(q));j=await r.json()}catch(e){box.innerHTML='';$('#locMsg').textContent='Couldn\'t reach the board.';return}
+  if(!r.ok){box.innerHTML='';$('#locMsg').textContent=j.error||'That didn\'t work.';return}
+  if(!j.length){box.innerHTML='<div class="empty">Nothing found by that name.</div>';return}
+  box.innerHTML=j.map((p,i)=>`<button class="net" data-i="${i}"><span>${esc(p.place)}</span><span>${p.lat.toFixed(2)}, ${p.lon.toFixed(2)}</span></button>`).join('');
+  box.querySelectorAll('button').forEach(b=>b.onclick=async()=>{const p=j[+b.dataset.i];try{await post('/api/board/location',p);box.style.display='none';$('#locMsg').textContent='Saved: '+p.place+'.';locLoad()}catch(e){$('#locMsg').textContent=e.message}})}
+async function locAuto(){try{await post('/api/board/location',{auto:true});locLoad()}catch(e){$('#locMsg').textContent=e.message}}
 async function setPower(){try{await post('/api/board/powersave',{on:$('#pwrMode').value==='on'});$('#pwrMsg').textContent='Saved.'}catch(e){$('#pwrMsg').textContent=e.message;$('#pwrMsg').className='msg err'}}
 async function setScreen(){try{await post('/api/board/screen',{sleep:$('#scrMode').value==='sleep'});$('#scrMsg').textContent='Saved.'}catch(e){$('#scrMsg').textContent=e.message;$('#scrMsg').className='msg err'}}
 async function reboot(){if(!confirm('Restart the board?'))return;await post('/api/board/reboot');$('#wMsg').textContent='Restarting… give it 15 seconds.'}
@@ -313,7 +329,7 @@ $('#restoreFile').addEventListener('change',async e=>{const file=e.target.files[
   }catch(err){cardMsg('Restore stopped: '+esc(err.message)+'. '+done+' files were put on the card before that.',1)}
   busy(false);load()});
 
-load();loadAdmin();setInterval(()=>{load();loadAdmin()},15000);
+load();loadAdmin();locLoad();setInterval(()=>{load();loadAdmin()},15000);
 
 </script>
 </body>

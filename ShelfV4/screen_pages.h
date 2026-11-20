@@ -3,7 +3,8 @@
 //   big clock - color of the day - CPU temperature
 // A song that starts playing takes over the screen for 30 seconds, then stays in the carousel
 // for 10 minutes. The clock pages need the time (from the internet, or from the first browser
-// that opens The Shelf). A short press of the button shows the next page.
+// that opens The Shelf). One press of the button keeps the page on for 30 seconds; two quick
+// presses show the next page.
 // Included once, from main.cpp, after drawStatusPage().
 #include "daily_gen.h"
 #include "world_map.h"
@@ -12,6 +13,7 @@ enum { P_STATUS, P_WATCH, P_NOW, P_EARTH, P_AFFIRM, P_CLOCK, P_WXGRAPH, P_COLOR,
 static int page = P_STATUS;
 static uint32_t pageAt = 0, pageLen = 10000;
 static volatile bool nextPageNow = false;
+static uint32_t holdUntil = 0;                      // one press of the button: stay on this page for 30 s
 static char npName[96] = "";
 static char npLabel[20] = "NOW PLAYING";
 static volatile bool npMusic = true;               // a song (the bars bounce) or a game, program, video, picture
@@ -366,7 +368,9 @@ static void drawScreen() {
   bool urgent = firstSetup || (!staOK && !apActive) || (comsLastAt && now - comsLastAt < 15000);
   if (urgent) { drawStatusPage(); oled.sendBuffer(); return; }
   if (nowPlayingFresh()) { drawNowPage(now - npAt); oled.sendBuffer(); return; }
-  if (skip || now - pageAt >= pageLen || !pageReady(page)) {
+  bool held = holdUntil && (int32_t)(holdUntil - now) > 0;
+  if (skip) holdUntil = 0;
+  if (skip || (!held && now - pageAt >= pageLen) || !pageReady(page)) {
     for (int i = 0; i < P_COUNT; i++) { page = (page + 1) % P_COUNT; if (pageReady(page)) break; }
     pageAt = now; pageLen = pageDuration(page);
   }

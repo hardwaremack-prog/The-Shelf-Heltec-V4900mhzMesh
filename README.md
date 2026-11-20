@@ -204,11 +204,11 @@ While it's on, the screen takes turns through these pages, about 6 to 10 seconds
 - **Today's affirmation** and the **color of the day**: the same ones The Shelf's Home page shows that day.
 - **CPU temperature** in °C and °F, how long the board has been on, and free memory.
 
-**Screen sleep:** by default the screen goes dark after 5 minutes (a song, game or picture opening restarts that). A short press of **PRG** (BOOT on an ESP32) wakes it, and so does **Wake** from a remote board over Coms. To keep it on all the time, set **Screen** to **Stays on** on the board's settings page. While it's on, a short press shows the next page.
+**Screen sleep:** by default the screen goes dark after 5 minutes (a song, game or picture opening restarts that). A short press of **PRG** (BOOT on an ESP32) wakes it, and so does **Wake** from a remote board over Coms. To keep it on all the time, set **Screen** to **Stays on** on the board's settings page. While it's on, one press keeps the page on for 30 seconds and two quick presses show the next page.
 
 The **Heltec V4** card at the bottom of The Shelf's sidebar opens the board's settings page (`/board/`). There you can change Wi-Fi, rename the board, see storage, and restart it. There's also the admin password and read-only switch.
 
-**PRG button:** a short press wakes the screen, or shows the next page. Hold it 6 seconds and let go to forget the Wi-Fi and go back to setup mode. Keep holding to 12 seconds to clear the admin password and turn read-only off.
+**PRG button:** a short press wakes the screen. While it's on, one press keeps the page for 30 seconds, two quick presses show the next page. Hold it 6 seconds and let go to forget the Wi-Fi and go back to setup mode. Keep holding to 12 seconds to clear the admin password and turn read-only off.
 
 ## More screenshots
 

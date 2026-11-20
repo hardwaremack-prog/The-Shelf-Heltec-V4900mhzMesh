@@ -138,6 +138,7 @@ void sendJsonArrayOfFiles(AsyncWebServerRequest* r, std::vector<String>* paths, 
 // ---------------------------------------------------------------- feature modules
 bool handleFilesApi(AsyncWebServerRequest* r, const String& url, WebRequestMethod m);
 bool handleToolsApi(AsyncWebServerRequest* r, const String& url, WebRequestMethod m);
+bool handleLocationApi(AsyncWebServerRequest* r, const String& url, WebRequestMethod m);
 bool handleMessagingApi(AsyncWebServerRequest* r, const String& url, WebRequestMethod m);
 bool handleBoardApi(AsyncWebServerRequest* r, const String& url, WebRequestMethod m);
 bool handleCardApi(AsyncWebServerRequest* r, const String& url, WebRequestMethod m);   // microSD backup/restore

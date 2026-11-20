@@ -278,9 +278,9 @@ static void drawStatusPage() {
   }
   oled.setFont(u8g2_font_4x6_tf);
 #if defined(SHELF_ESP32)
-  const char* keys = "EN = restart \xC2\xB7 BOOT = next page";
+  const char* keys = "EN restart \xC2\xB7 BOOT 1x hold 2x next";
 #else
-  const char* keys = "RST = restart \xC2\xB7 PRG = next page";
+  const char* keys = "RST restart \xC2\xB7 PRG 1x hold 2x next";
 #endif
   oled.drawUTF8((128 - oled.getUTF8Width(keys)) / 2, 53, keys);
   oled.setFont(u8g2_font_6x10_tf);
@@ -691,11 +691,14 @@ static void setupServer(AsyncWebServer& s) {
 }
 
 // ------------------------------------------------------------ button
-// short press: wake the screen, or when it's on, show the next page.
+// short press: wake the screen; when it's on, one press keeps the page for 30 s, two show the next page.
 // hold 6 s, then let go: forget Wi-Fi.  keep holding to 12 s: clear the admin password.
-static uint32_t btnDownAt = 0; static bool btnDown = false;
+static uint32_t btnDownAt = 0, tapAt = 0; static bool btnDown = false;
 static void handleButton() {
   bool down = digitalRead(PIN_BUTTON) == LOW; uint32_t now = millis();
+  if (tapAt && !down && now - tapAt >= 450) {       // just the one press: keep this page on for 30 seconds
+    tapAt = 0; holdUntil = (now + 30000) | 1; screenWake();
+  }
   if (down && !btnDown) { btnDown = true; btnDownAt = now; }
   uint32_t held = now - btnDownAt;
   if (down && held > 1500) {
@@ -722,7 +725,11 @@ static void handleButton() {
 #endif
       delay(1200); ESP.restart();
     }
-    if (held < 800) { if (!screenOn) { screenOn = true; oledPower(0); } else nextPageNow = true; }
+    if (held < 800) {
+      if (!screenOn) { screenOn = true; oledPower(0); }
+      else if (tapAt && now - tapAt < 450) { tapAt = 0; nextPageNow = true; }   // two quick presses: next page
+      else tapAt = now | 1;                                                    // one: wait to see if a second comes
+    }
   }
 }
 

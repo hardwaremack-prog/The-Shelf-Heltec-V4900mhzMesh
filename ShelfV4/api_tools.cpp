@@ -207,11 +207,14 @@ void recordVisitor(const String& ip) {
 }
 
 // ------------------------------------------------------------ outside temperature, last 4 days
+static String wxKey;                                // the weather cache's place (see weather())
 // The board learns where it is from The Shelf's Home page (its weather asks with the browser's
 // location), keeps that, and once an hour (on a home Wi-Fi with internet) fetches the hourly
 // temperature for the past 4 days from Open-Meteo, for the screen's graph.
 static Preferences wxp; static bool wxpOpen = false;
 static float wxLat = NAN, wxLon = NAN;
+static bool wxManual = false;                       // set by hand on the settings page: browsers don't change it
+static String wxPlace;
 static float hist[WX_HOURS]; static int histN = 0; static uint32_t histStart = 0;
 static uint32_t histAt = 0; static volatile bool histBusy = false;
 static portMUX_TYPE histMux = portMUX_INITIALIZER_UNLOCKED;
@@ -219,12 +222,74 @@ static void wxOpen() {
   if (wxpOpen) return;
   wxp.begin("wx", false); wxpOpen = true;
   wxLat = wxp.getFloat("lat", NAN); wxLon = wxp.getFloat("lon", NAN);
+  wxManual = wxp.getBool("manual", false); wxPlace = wxp.getString("place", "");
 }
 void wxRemember(double lat, double lon) {
   wxOpen();
+  if (wxManual) return;
   if (!isnan(wxLat) && fabs(wxLat - lat) < 0.05 && fabs(wxLon - lon) < 0.05) return;
   wxLat = lat; wxLon = lon; wxp.putFloat("lat", wxLat); wxp.putFloat("lon", wxLon);
   histAt = 0;                                       // somewhere new: fetch again soon
+}
+static String urlEnc(const String& v) {
+  String o; char h[4];
+  for (size_t i = 0; i < v.length(); i++) {
+    char c = v[i];
+    if (isalnum((unsigned char)c) || c == '-' || c == '.' || c == '_') o += c; else { snprintf(h, sizeof h, "%%%02X", (uint8_t)c); o += h; }
+  }
+  return o;
+}
+// The board's location, from its settings page:
+//   GET  /api/board/location               {lat, lon, place, manual}
+//   GET  /api/board/location/search?q=...  places with that name (Open-Meteo's geocoding)
+//   POST /api/board/location               {lat, lon, place}  set it by hand;  {auto:true}  back to the browser's
+bool handleLocationApi(AsyncWebServerRequest* r, const String& url, WebRequestMethod m) {
+  if (url != "/api/board/location" && url != "/api/board/location/search") return false;
+  wxOpen();
+  if (url == "/api/board/location/search") {
+    String q = r->hasParam("q") ? r->getParam("q")->value() : "";
+    q.trim();
+    if (q.length() < 2) { sendErr(r, 400, "Type a town, city or ZIP code."); return true; }
+    if (!staOK) { sendErr(r, 502, "The board needs your home Wi-Fi (with internet) to look places up."); return true; }
+    HTTPClient http; http.setTimeout(8000);
+    String u = "http://geocoding-api.open-meteo.com/v1/search?count=6&language=en&format=json&name=" + urlEnc(q);
+    if (!http.begin(u)) { sendErr(r, 502, "Couldn't reach the place finder."); return true; }
+    int code = http.GET();
+    if (code != 200) { http.end(); sendErr(r, 502, String("Couldn't reach the place finder (") + code + ")."); return true; }
+    JsonDocument f; JsonObject fe = f["results"][0].to<JsonObject>();
+    fe["name"] = true; fe["latitude"] = true; fe["longitude"] = true; fe["admin1"] = true; fe["country"] = true; fe["postcodes"] = true;
+    JsonDocument j(&psAlloc);
+    DeserializationError e = deserializeJson(j, http.getStream(), DeserializationOption::Filter(f));
+    http.end();
+    if (e) { sendErr(r, 502, "Unexpected answer from the place finder."); return true; }
+    JsonDocument out(&psAlloc); JsonArray a = out.to<JsonArray>();
+    for (JsonObject p : j["results"].as<JsonArray>()) {
+      JsonObject o = a.add<JsonObject>();
+      String nm = p["name"] | "";
+      if (!p["admin1"].isNull()) nm += String(", ") + (const char*)p["admin1"];
+      if (!p["country"].isNull()) nm += String(", ") + (const char*)p["country"];
+      o["place"] = nm; o["lat"] = p["latitude"]; o["lon"] = p["longitude"];
+    }
+    sendDoc(r, out);
+    return true;
+  }
+  if (m == HTTP_POST) {
+    JsonDocument b; parseBody(r, b);
+    if (b["auto"] | false) {
+      wxManual = false; wxPlace = ""; wxp.putBool("manual", false); wxp.remove("place");
+    } else {
+      float la = b["lat"] | NAN, lo = b["lon"] | NAN;
+      if (isnan(la) || isnan(lo) || la < -90 || la > 90 || lo < -180 || lo > 180) { sendErr(r, 400, "That isn't a place on the map."); return true; }
+      wxLat = la; wxLon = lo; wxManual = true; wxPlace = String(b["place"] | "").substring(0, 80);
+      wxp.putFloat("lat", wxLat); wxp.putFloat("lon", wxLon); wxp.putBool("manual", true); wxp.putString("place", wxPlace);
+      histAt = 0; wxKey = "";                       // fetch the temperatures for the new place
+    }
+  }
+  JsonDocument o;
+  if (isnan(wxLat)) { o["lat"] = nullptr; o["lon"] = nullptr; } else { o["lat"] = wxLat; o["lon"] = wxLon; }
+  o["place"] = wxPlace; o["manual"] = wxManual;
+  sendDoc(r, o);
+  return true;
 }
 bool wxLocation(float& lat, float& lon) { wxOpen(); lat = wxLat; lon = wxLon; return !isnan(wxLat); }
 int wxHistoryCopy(float* out, int max, uint32_t* startUtc) {
@@ -277,7 +342,7 @@ void wxHistoryTick() {
 }
 
 // ------------------------------------------------------------ Weather (Open-Meteo, cached 10 minutes)
-static String wxKey, wxData; static uint32_t wxAt = 0;
+static String wxData; static uint32_t wxAt = 0;
 static void weather(AsyncWebServerRequest* r) {
   double lat = r->hasParam("lat") ? r->getParam("lat")->value().toDouble() : NAN;
   double lon = r->hasParam("lon") ? r->getParam("lon")->value().toDouble() : NAN;
@@ -320,6 +385,7 @@ static void weather(AsyncWebServerRequest* r) {
 
 // ------------------------------------------------------------ router
 bool handleToolsApi(AsyncWebServerRequest* r, const String& url, WebRequestMethod m) {
+  if (handleLocationApi(r, url, m)) return true;
   for (int i = 0; COLLECTIONS[i]; i++) {
     String base = String("/api/") + COLLECTIONS[i];
     if (url == base) return collection(r, COLLECTIONS[i], "", m);

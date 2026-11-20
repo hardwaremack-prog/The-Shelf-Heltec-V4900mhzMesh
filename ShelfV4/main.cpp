@@ -289,7 +289,11 @@ static void drawStatusPage() {
 #include "screen_pages.h"
 
 // ------------------------------------------------------------ storage
+bool sdOnAlt = false;                       // the card is on the second layout (GNSS connector free)
 static void setupStorage() {
+#ifdef SD_ALT_CS
+  pinMode(SD_ALT_CS, INPUT_PULLUP);          // keeps a card on the other layout deselected meanwhile
+#endif
   sdSPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
   // Bare microSD breakouts have no pull-up resistors. Without one the card's data-out line
   // floats while it's busy, and the board can misread "busy" or "write accepted", so writes
@@ -313,6 +317,18 @@ static void setupStorage() {
     else if (SD.begin(SD_CS_INLINE, sdSPI, 4000000, "/sd", 10)) onSD = true;
     if (onSD && SD.cardType() == CARD_NONE) { SD.end(); onSD = false; }
     if (onSD) Serial.println("[shelf] microSD found on the in-line wiring (MOSI 5, CS 17)");
+  }
+#endif
+#ifdef SD_ALT_CS
+  // Six wires to CS 4, MISO 6, CLK 47, MOSI 48 (leaves the GNSS connector free for the GPS kit)
+  if (!onSD) {
+    SD.end(); sdSPI.end();
+    sdSPI.begin(SD_ALT_SCK, SD_ALT_MISO, SD_ALT_MOSI, SD_ALT_CS);
+    for (int pin : {SD_ALT_MISO, SD_ALT_MOSI, SD_ALT_CS}) gpio_pullup_en((gpio_num_t)pin);
+    if (SD.begin(SD_ALT_CS, sdSPI, 10000000, "/sd", 10)) onSD = true;
+    else if (SD.begin(SD_ALT_CS, sdSPI, 4000000, "/sd", 10)) onSD = true;
+    if (onSD && SD.cardType() == CARD_NONE) { SD.end(); onSD = false; }
+    if (onSD) { sdOnAlt = true; Serial.println("[shelf] microSD found on CS 4, MISO 6, CLK 47, MOSI 48"); }
   }
 #endif
   if (onSD) store = &SD;
@@ -506,7 +522,7 @@ bool handleBoardApi(AsyncWebServerRequest* r, const String& url, WebRequestMetho
       ",\"setup\":" + (firstSetup ? "true" : "false") + ",\"homeSsid\":\"" + jsonEsc(wifiSSID) + "\",\"apOpen\":" + (ownPass.length() >= 8 ? "false" : "true") + ",\"apPass\":\"" + jsonEsc(ownPass) + "\"" +
       ",\"clients\":" + (apActive ? WiFi.softAPgetStationNum() : 0) + ",\"timeSet\":" + (time(nullptr) > 1700000000 ? "true" : "false") + ",\"tz\":" + tzMin + ",\"scrSleep\":" + (scrAutoSleep ? "true" : "false") + ",\"pwrSave\":" + (pwrSave ? "true" : "false") + ",\"cpuMhz\":" + getCpuFrequencyMhz() + ",\"temp\":" + String(temperatureRead(), 1) +
       ",\"uptime\":" + (millis() / 1000) +
-      ",\"sdPins\":\"" SD_PINS "\",\"sdRetries\":" + String(sdRetries) + ",\"sdFailures\":" + String(sdFailures) + ",\"heap\":" + ESP.getFreeHeap() + ",\"psram\":" + ESP.getPsramSize() + "}";
+      ",\"sdPins\":\"" + String(sdOnAlt ? "CS 4, MISO 6, CLK 47, MOSI 48" : SD_PINS) + "\",\"gps\":" + (gpsAvailable() ? "true" : "false") + ",\"sdRetries\":" + String(sdRetries) + ",\"sdFailures\":" + String(sdFailures) + ",\"heap\":" + ESP.getFreeHeap() + ",\"psram\":" + ESP.getPsramSize() + "}";
     sendJson(r, 200, s); return true;
   }
   if (url == "/api/board/wifi/scan") {
@@ -680,7 +696,7 @@ class ShelfHandler : public AsyncWebHandler {
     }
     try {
     if (serveContent(r, url)) return;
-    bool done = handleOtaApi(r, url, m) || handleBtApi(r, url, m) || handleThumbImportApi(r, url, m) || handleCardApi(r, url, m) || handleBoardApi(r, url, m) || handleComsApi(r, url, m) || handleMessagingApi(r, url, m) || handleFilesApi(r, url, m) || handleToolsApi(r, url, m);
+    bool done = handleGpsApi(r, url, m) || handleOtaApi(r, url, m) || handleBtApi(r, url, m) || handleThumbImportApi(r, url, m) || handleCardApi(r, url, m) || handleBoardApi(r, url, m) || handleComsApi(r, url, m) || handleMessagingApi(r, url, m) || handleFilesApi(r, url, m) || handleToolsApi(r, url, m);
     if (!done) sendErr(r, 404, "Not found");
     } catch (...) {
       // out of memory part-way through (a big list on a board without PSRAM): say so, keep running
@@ -839,6 +855,7 @@ void setup() {
 
   if (!LittleFS.begin(false, "/www", 10, "www")) oledMsg("Web app missing", "Re-flash from the", "installer page");
   setupStorage();
+  gpsBegin();                 // (after the card: they may share pins)
   refreshStats();
 
   WiFi.persistent(false);
@@ -878,6 +895,7 @@ void loop() {
   if (rebootLaterAt && (int32_t)(now - rebootLaterAt) >= 0) { rebootLaterAt = 0; rebootAt = now; }
   if (sleepAt && (int32_t)(now - sleepAt) >= 0) { sleepAt = 0; goDeepSleep(); }
   powerTick(now);
+  gpsTick();
   wxHistoryTick();
   lowBatteryTick(now);
   if (rebootAt && now > rebootAt) { oledMsg("Restarting..."); delay(200); ESP.restart(); }

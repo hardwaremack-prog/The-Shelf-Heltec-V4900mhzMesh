@@ -863,3 +863,141 @@
   setTimeout(tick, 4000);
   setInterval(tick, 30 * 60000);
 })();
+
+// ---- GPS (Heltec V4 with Heltec's GPS kit on its GNSS connector) ----
+// A map of where the board is and where it's been (OpenStreetMap, when this browser has internet;
+// otherwise the trail drawn on its own), and everything the GPS knows: height, speed, heading,
+// the satellites, the ham radio grid square, the time from the sky.
+(function () {
+  let timer = null, map = null, marker = null, line = null, ring = null, trail = [], lastT = 0, follow = true, leafletState = 0;
+  const C = { mph: k => k * 0.621371, ft: m => m * 3.28084 };
+  const dirs = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
+  const compass = d => dirs[Math.round(((d % 360) + 360) % 360 / 22.5) % 16];
+  const dms = (v, pos, neg) => { const a = Math.abs(v), d = Math.floor(a), mf = (a - d) * 60, m = Math.floor(mf), s = ((mf - m) * 60).toFixed(1); return `${d}° ${m}′ ${s}″ ${v >= 0 ? pos : neg}`; };
+  function grid(lat, lon) {
+    const x = lon + 180, y = lat + 90, A = 'A'.charCodeAt(0), a = 'a'.charCodeAt(0);
+    return String.fromCharCode(A + Math.floor(x / 20), A + Math.floor(y / 10)) + Math.floor(x / 2 % 10) + Math.floor(y % 10) +
+      String.fromCharCode(a + Math.floor(x * 12 % 24), a + Math.floor(y * 24 % 24));
+  }
+  function sunTimes(lat, lon) {                     // sunrise and sunset today (NOAA), local time
+    const d = new Date(), n = Math.floor((Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) - Date.UTC(d.getFullYear(), 0, 0)) / 864e5);
+    const g = 2 * Math.PI / 365 * (n - 1), r = Math.PI / 180;
+    const eq = 229.18 * (0.000075 + 0.001868 * Math.cos(g) - 0.032077 * Math.sin(g) - 0.014615 * Math.cos(2 * g) - 0.040849 * Math.sin(2 * g));
+    const dec = 0.006918 - 0.399912 * Math.cos(g) + 0.070257 * Math.sin(g) - 0.006758 * Math.cos(2 * g) + 0.000907 * Math.sin(2 * g) - 0.002697 * Math.cos(3 * g) + 0.00148 * Math.sin(3 * g);
+    const c = (Math.cos(90.833 * r) / (Math.cos(lat * r) * Math.cos(dec)) - Math.tan(lat * r) * Math.tan(dec));
+    if (c > 1 || c < -1) return null;
+    const ha = Math.acos(c) / r, noon = 720 - 4 * lon - eq;
+    const t = mins => { const x = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) + mins * 60000); return x.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); };
+    return [t(noon - 4 * ha), t(noon + 4 * ha)];
+  }
+  function loadLeaflet() {
+    if (window.L || leafletState) return;
+    leafletState = 1;
+    const css = document.createElement('link'); css.rel = 'stylesheet'; css.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'; document.head.appendChild(css);
+    const s = document.createElement('script'); s.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+    s.onload = () => { leafletState = 2; last = null; };
+    s.onerror = () => { leafletState = 3; };
+    document.head.appendChild(s);
+  }
+  let last = null;
+  const viewing = () => typeof state !== 'undefined' && state.view === 'gps';
+  const post = (u, d) => fetch(u, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(d || {}) });
+
+  function drawTrailCanvas(cv, g) {                 // no map tiles (no internet here): the trail on its own
+    const ctx = cv.getContext('2d'), w = cv.width = cv.clientWidth * devicePixelRatio, h = cv.height = cv.clientHeight * devicePixelRatio;
+    ctx.fillStyle = '#0d1420'; ctx.fillRect(0, 0, w, h);
+    const pts = trail.length ? trail.map(p => [p[0], p[1]]) : g.fix ? [[g.lat, g.lon]] : [];
+    if (!pts.length) return;
+    let la0 = Math.min(...pts.map(p => p[0])), la1 = Math.max(...pts.map(p => p[0])), lo0 = Math.min(...pts.map(p => p[1])), lo1 = Math.max(...pts.map(p => p[1]));
+    const k = Math.cos((la0 + la1) / 2 * Math.PI / 180), pad = 0.0015;
+    la0 -= pad; la1 += pad; lo0 -= pad / k; lo1 += pad / k;
+    const sc = Math.min(w / ((lo1 - lo0) * k), h / (la1 - la0)) * 0.9;
+    const X = lo => w / 2 + (lo - (lo0 + lo1) / 2) * k * sc, Y = la => h / 2 - (la - (la0 + la1) / 2) * sc;
+    ctx.strokeStyle = 'rgba(255,255,255,.08)'; ctx.lineWidth = 1;
+    for (let i = 1; i < 6; i++) { ctx.beginPath(); ctx.moveTo(w * i / 6, 0); ctx.lineTo(w * i / 6, h); ctx.moveTo(0, h * i / 6); ctx.lineTo(w, h * i / 6); ctx.stroke(); }
+    ctx.strokeStyle = '#f2b441'; ctx.lineWidth = 3 * devicePixelRatio; ctx.beginPath();
+    pts.forEach((p, i) => i ? ctx.lineTo(X(p[1]), Y(p[0])) : ctx.moveTo(X(p[1]), Y(p[0]))); ctx.stroke();
+    if (g.fix) { ctx.fillStyle = '#5ac8ff'; ctx.beginPath(); ctx.arc(X(g.lon), Y(g.lat), 7 * devicePixelRatio, 0, 7); ctx.fill(); }
+    ctx.fillStyle = '#7f93a8'; ctx.font = `${12 * devicePixelRatio}px sans-serif`; ctx.fillText('No map tiles without internet: your trail is shown on its own', 10 * devicePixelRatio, h - 10 * devicePixelRatio);
+  }
+
+  function render(g) {
+    const content = el('#content');
+    if (!g.supported) {
+      content.innerHTML = `<div class="coms"><div class="coms-card coms-off"><b>No GPS on this board.</b><br>The GPS tab is for a Heltec V4 with Heltec's GPS kit plugged into its GNSS connector. The V4-R8 can't power the kit (its pin is used by the board's memory).</div></div>`;
+      return;
+    }
+    const f = g.fix, mph = g.kmh != null ? C.mph(g.kmh) : null, sun = f ? sunTimes(g.lat, g.lon) : null;
+    const acc = g.hdop != null ? Math.max(2, Math.round(g.hdop * 3)) : null;
+    const status = !g.on ? 'GPS is off' : !g.talking ? 'Waiting for the GPS…' : f ? `Fix: ${g.sats} satellites` : `Looking for satellites (${g.view} in view)…`;
+    const card = (t, v, s) => `<div class="gps-card"><div class="gps-t">${t}</div><div class="gps-v">${v}</div>${s ? `<div class="gps-s">${s}</div>` : ''}</div>`;
+    const head = `
+      <div class="coms-card">
+        <div class="coms-top">
+          <label class="toggle-switch"><input type="checkbox" id="gpsToggle" ${g.on ? 'checked' : ''} ${g.pins ? '' : 'disabled'}><span class="toggle-slider"></span></label>
+          <span class="power-label">${escapeHtml(status)}</span>
+          <span class="sub">${!g.pins ? 'The microSD card is wired to the GNSS connector’s pins (42 · 41 · 40 · 39). Move it to CS 4, MISO 6, CLK 47, MOSI 48 (see the installer page) to use the GPS kit.'
+            : !g.on ? 'Turn it on with Heltec’s GPS kit plugged into the V4’s GNSS connector. The first fix takes a minute or two outdoors.'
+            : !g.talking ? 'Nothing from the GPS yet. Check the kit is plugged in all the way.' : f ? 'The board’s location, earth map and weather follow the GPS while it has a fix.' : 'Best outdoors or by a window, with open sky. It can take a few minutes the first time.'}</span>
+        </div>
+      </div>`;
+    if (!document.getElementById('gpsMap')) {
+      content.innerHTML = `<div class="coms gps"><div id="gpsHead"></div>
+        <div class="coms-card gps-mapcard"><div id="gpsMap"></div><canvas id="gpsCanvas"></canvas>
+          <div class="gps-maprow"><label class="gps-follow"><input type="checkbox" id="gpsFollow" checked> Keep the map on the board</label>
+          <a class="coms-chip" href="/api/gps/track.gpx" download>Download trail (GPX)</a><button class="coms-chip" id="gpsClear">New trail</button></div></div>
+        <div class="gps-grid" id="gpsGrid"></div></div>`;
+      content.querySelector('#gpsFollow').onchange = e => { follow = e.target.checked; };
+      content.querySelector('#gpsClear').onclick = async () => { if (!confirm('Start a new trail? The current one is forgotten (download it first to keep it).')) return; await post('/api/gps/clear'); trail = []; lastT = 0; if (line) line.setLatLngs([]); };
+      map = null; marker = null; line = null; ring = null;
+    }
+    document.getElementById('gpsHead').innerHTML = head;
+    const tg = document.getElementById('gpsToggle');
+    tg.onchange = async e => { const r = await post('/api/gps/power', { on: e.target.checked }); if (!r.ok) { const j = await r.json().catch(() => ({})); alert(j.error || 'That didn’t work.'); } refresh(); };
+    document.getElementById('gpsGrid').innerHTML = f ? [
+      card('Position', `${g.lat.toFixed(5)}, ${g.lon.toFixed(5)}`, `${dms(g.lat, 'N', 'S')} · ${dms(g.lon, 'E', 'W')}<br><a href="https://www.openstreetmap.org/?mlat=${g.lat}&mlon=${g.lon}#map=16/${g.lat}/${g.lon}" target="_blank" rel="noopener">OpenStreetMap</a> · <a href="https://www.google.com/maps?q=${g.lat},${g.lon}" target="_blank" rel="noopener">Google Maps</a>`),
+      card('Altitude', g.altM != null ? `${Math.round(C.ft(g.altM)).toLocaleString()} ft` : '--', g.altM != null ? `${Math.round(g.altM)} m above sea level` : ''),
+      card('Speed', mph != null ? `${mph < 10 ? mph.toFixed(1) : Math.round(mph)} mph` : '--', `${g.kmh != null ? g.kmh.toFixed(1) + ' km/h · ' : ''}top ${Math.round(C.mph(g.maxKmh))} mph`),
+      card('Heading', g.course != null && g.kmh > 2 ? `<span class="gps-arrow" style="transform:rotate(${g.course}deg)">↑</span> ${Math.round(g.course)}° ${compass(g.course)}` : 'Standing still', ''),
+      card('Grid square', grid(g.lat, g.lon), 'Maidenhead locator, for ham radio'),
+      card('Satellites', `${g.sats} used · ${g.view} in view`, acc ? `Accurate to about ±${acc} m (HDOP ${g.hdop.toFixed(1)})` : ''),
+      card('Trail', `${(g.distKm * 0.621371).toFixed(2)} mi`, `${trail.length} points kept (one every 10 s on the move)`),
+      card('Sun', sun ? `☀ ${sun[0]} · ${sun[1]}` : '--', 'Sunrise and sunset here today'),
+      card('Time from the satellites', g.utc ? new Date(g.utc).toLocaleTimeString() : '--', g.utc ? new Date(g.utc).toUTCString().slice(17, 25) + ' UTC' : '')
+    ].join('') : `<div class="gps-card" style="grid-column:1/-1"><div class="gps-t">Satellites</div><div class="gps-v">${g.on ? g.view + ' in view' : '--'}</div><div class="gps-s">${g.on && g.talking ? 'Heard ' + g.sentences + ' messages from the GPS so far.' : ''}</div></div>`;
+    // the map
+    const mapEl = document.getElementById('gpsMap'), cv = document.getElementById('gpsCanvas');
+    if (window.L && leafletState === 2) {
+      cv.style.display = 'none'; mapEl.style.display = 'block';
+      if (!map) {
+        map = L.map(mapEl, { zoomControl: true }).setView(f ? [g.lat, g.lon] : [42.33, -83.05], f ? 16 : 3);
+        L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap contributors' }).addTo(map);
+        line = L.polyline(trail.map(p => [p[0], p[1]]), { color: '#f2b441', weight: 4 }).addTo(map);
+      }
+      if (f) {
+        if (!marker) { marker = L.circleMarker([g.lat, g.lon], { radius: 8, color: '#fff', weight: 2, fillColor: '#3aa0ff', fillOpacity: 1 }).addTo(map); ring = L.circle([g.lat, g.lon], { radius: acc || 10, color: '#3aa0ff', weight: 1, fillOpacity: 0.12 }).addTo(map); }
+        marker.setLatLng([g.lat, g.lon]); ring.setLatLng([g.lat, g.lon]); if (acc) ring.setRadius(acc);
+        if (follow) map.panTo([g.lat, g.lon], { animate: true });
+      }
+      line.setLatLngs(trail.map(p => [p[0], p[1]]));
+    } else {
+      mapEl.style.display = 'none'; cv.style.display = 'block';
+      drawTrailCanvas(cv, g);
+    }
+  }
+  async function refresh() {
+    if (!viewing()) { clearInterval(timer); timer = null; return; }
+    let g; try { g = await fetch('/api/gps?since=' + lastT, { cache: 'no-store' }).then(r => r.json()); } catch { return; }
+    if (g.track && g.track.length) { trail = trail.concat(g.track); lastT = g.last; if (trail.length > 2000) trail = trail.slice(-2000); }
+    render(g);
+  }
+  window.loadGpsView = function () {
+    setToolHeader('GPS', 'Where the board is, from Heltec’s GPS kit', null, null);
+    el('#content').innerHTML = '';
+    trail = []; lastT = 0; map = null;
+    loadLeaflet();
+    refresh();
+    clearInterval(timer);
+    timer = setInterval(refresh, 2000);
+  };
+})();

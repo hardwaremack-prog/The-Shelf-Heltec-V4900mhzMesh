@@ -4,7 +4,7 @@
 // Same microSD wiring as Heltec Shelf Lite, so a board wired for that works as-is.
 #pragma once
 
-#define FW_VERSION "1.17.3"
+#define FW_VERSION "1.18.0"
 // Every board's own Wi-Fi has the same fixed address you can bookmark: http://10.1.1.250
 // (phones and laptops that join get 10.1.1.100 and up).
 #define AP_IP           10, 1, 1, 250
@@ -89,5 +89,21 @@
 #define SD_SCK   40
 #define SD_MISO  39
 #define SD_PINS  "CS 42, MOSI 41, CLK 40, MISO 39"
+// Also looked for (if there's no card on the pins above): six wires to CS 4, MISO 6, CLK 47,
+// MOSI 48, the R8's layout, which leaves the V4's GNSS connector free for the GPS kit.
+#define SD_ALT_CS   4
+#define SD_ALT_MISO 6
+#define SD_ALT_SCK  47
+#define SD_ALT_MOSI 48
+#if !defined(SHELF_V3)
+// The V4's GNSS connector (Heltec's L76K GPS kit), as in Meshtastic's heltec_v4 variant
+#define HAS_GNSS     1
+#define GNSS_RX      38   // data from the GPS
+#define GNSS_TX      39   // data to the GPS
+#define GNSS_EN      34   // LOW = GPS powered
+#define GNSS_STANDBY 40   // HIGH = awake
+#define GNSS_PPS     41
+#define GNSS_RESET   42   // LOW resets it
+#endif
 #endif
 #endif   // SHELF_ESP32

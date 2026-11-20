@@ -306,6 +306,18 @@ const char* wxStatusText() {                        // the screen's graph page, 
   if (wxErr.length()) return "Couldn't get them yet";
   return "Getting them...";
 }
+// The GPS has a fix: the board is exactly here (beats a typed-in ZIP or an internet-address guess).
+// Saved when it's moved a kilometre or so, and the weather is fetched for the new place.
+void wxFromGps(double lat, double lon) {
+  wxOpen();
+  bool moved = isnan(wxLat) || fabs(wxLat - lat) > 0.01 || fabs(wxLon - lon) > 0.01;
+  wxLat = lat; wxLon = lon;
+  if (moved) {
+    wxp.putFloat("lat", wxLat); wxp.putFloat("lon", wxLon);
+    wxPlace = "From the GPS"; wxp.putString("place", wxPlace);
+    if (isnan(wxLat) || histAt) histAt = 0;
+  }
+}
 bool wxLocation(float& lat, float& lon) { wxOpen(); lat = wxLat; lon = wxLon; return !isnan(wxLat); }
 int wxHistoryCopy(float* out, int max, uint32_t* startUtc) {
   portENTER_CRITICAL(&histMux);

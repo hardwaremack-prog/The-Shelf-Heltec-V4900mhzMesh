@@ -225,6 +225,16 @@ The **Heltec V4** card at the bottom of The Shelf's sidebar opens the board's se
 
 On by default (board settings page, **Power**). When nobody has used the board for 90 seconds (no page open, nothing streaming or updating), the CPU drops from 240 to 80 MHz, and on a home Wi-Fi the Wi-Fi radio sleeps between the router's beacons, waking for each one (not while Coms is on, since boards hear each other over 2.4 GHz only while it listens). The first web request brings full speed straight back; the CPU temperature screen page shows the speed. On battery, the board also goes into deep sleep before the battery runs flat (below 3.3 V for two minutes), waking every hour to look again, or when PRG is pressed. The rest of the power goes to Meshed Comms (its radio listens all the time), the board's own Wi-Fi (it can't nap while phones may join) and the screen.
 
+## GPS (Heltec V4)
+
+With Heltec's L76K GPS kit plugged into the V4's GNSS connector, the **GPS** tab (at the bottom of the tools) shows a map of where the board is and the trail it's taken (OpenStreetMap, when the browser has internet; the trail on its own when it doesn't), plus latitude and longitude, altitude, speed and top speed, heading, satellites used and in view with the accuracy, the Maidenhead grid square, sunrise and sunset, and the time from the satellites. **Download trail (GPX)** saves the trail for mapping apps. While it has a fix, the board's location (earth map, weather) follows the GPS, and its clock is set from it if nothing else has. The screen gets a GPS page too.
+
+The GNSS connector uses GPIO 34 and 38–42, so the microSD card can't be on the in-line spot (42 · 41 · 40 · 39): wire it to CS 4, MISO 6, CLK 47, MOSI 48 instead (1.18 and later look for it there too).
+
+![microSD wiring on a Heltec V4 with the GPS kit](docs/sd-wiring-shelf-v4-gps.png)
+
+[The same, seen from underneath](docs/sd-wiring-shelf-v4-gps-bottom.png). The V4-R8 can't power the GPS kit (GPIO 34 belongs to its memory).
+
 ## Meshed Comms bands (Heltec V3 / V4)
 
 A Heltec talks on two bands at once: 900 MHz LoRa (long range) and 2.4 GHz (ESP-NOW, which reaches the plain ESP32 boards). In the Meshed Comms tab, the **915.0 MHz** and **2.4 GHz** chips are switches: tap one to turn that band off or back on (one has to stay on). With 2.4 GHz off, the board's Wi-Fi can save power again while it's idle.

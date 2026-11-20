@@ -9,7 +9,7 @@
 #include "daily_gen.h"
 #include "world_map.h"
 
-enum { P_STATUS, P_WATCH, P_NOW, P_EARTH, P_AFFIRM, P_CLOCK, P_WXGRAPH, P_COLOR, P_TEMP, P_COUNT };
+enum { P_STATUS, P_WATCH, P_NOW, P_EARTH, P_GPS, P_AFFIRM, P_CLOCK, P_WXGRAPH, P_COLOR, P_TEMP, P_COUNT };
 static int page = P_STATUS;
 static uint32_t pageAt = 0, pageLen = 10000;
 static volatile bool nextPageNow = false;
@@ -349,12 +349,57 @@ static void drawWxGraphPage() {
   oled.drawStr((128 - oled.getStrWidth(b)) / 2, 63, b);
 }
 
+// GPS (Heltec V4 with the GPS kit, switched on in the GPS tab): where, how high, how fast,
+// the ham radio grid square, and the satellites.
+static void gridSquare(double lat, double lon, char* out) {           // Maidenhead locator, 6 characters
+  double x = lon + 180, y = lat + 90;
+  out[0] = 'A' + (int)(x / 20); out[1] = 'A' + (int)(y / 10);
+  out[2] = '0' + (int)fmod(x / 2, 10); out[3] = '0' + (int)fmod(y, 10);
+  out[4] = 'a' + (int)fmod(x * 12, 24); out[5] = 'a' + (int)fmod(y * 24, 24); out[6] = 0;
+}
+static void drawGpsPage() {
+  double lat, lon; float alt, kmh; int sats, view;
+  bool fix = gpsScreen(lat, lon, alt, kmh, sats, view);
+  char b[40];
+  if (!fix) {
+    header("GPS");
+    oled.setFont(u8g2_font_6x10_tf);
+    if (!gpsTalking()) { drawPass(30, "No word from the GPS", 0); oled.setFont(u8g2_font_5x7_tf); drawPass(44, "Is the GPS kit plugged in?", 0); }
+    else {
+      drawPass(30, "Looking for satellites", 0);
+      oled.setFont(u8g2_font_5x7_tf);
+      snprintf(b, sizeof b, "%d in view", view); oled.drawStr((128 - oled.getStrWidth(b)) / 2, 44, b);
+      oled.drawStr((128 - oled.getStrWidth("Best outdoors, sky in view")) / 2, 62, "Best outdoors, sky in view");
+      // a little radar sweep, so it's clearly working
+      float a = (millis() % 2000) / 2000.0f * 2 * (float)M_PI;
+      oled.drawCircle(118, 22, 6); oled.drawLine(118, 22, 118 + (int)lroundf(sinf(a) * 6), 22 - (int)lroundf(cosf(a) * 6));
+      scrolling = true;
+    }
+    return;
+  }
+  snprintf(b, sizeof b, "GPS \xB7 %d SATS", sats); header(b);
+  oled.setFont(u8g2_font_6x10_tf);
+  snprintf(b, sizeof b, "%c %.5f", lat >= 0 ? 'N' : 'S', fabs(lat)); oled.drawStr(0, 22, b);
+  snprintf(b, sizeof b, "%c %.5f", lon >= 0 ? 'E' : 'W', fabs(lon)); oled.drawStr(0, 33, b);
+  oled.setFont(u8g2_font_5x7_tf);
+  if (isnan(alt)) snprintf(b, sizeof b, "alt --"); else snprintf(b, sizeof b, "%.0f ft", alt * 3.28084f);
+  oled.drawStr(128 - oled.getStrWidth(b), 22, b);
+  if (isnan(kmh)) snprintf(b, sizeof b, "-- mph"); else snprintf(b, sizeof b, "%.0f mph", kmh * 0.621371f);
+  oled.drawStr(128 - oled.getStrWidth(b), 33, b);
+  char g[8]; gridSquare(lat, lon, g);
+  oled.setFont(u8g2_font_helvB10_tf);
+  snprintf(b, sizeof b, "Grid %s", g); oled.drawStr((128 - oled.getStrWidth(b)) / 2, 58, b);
+  // the satellites in use as dots along the bottom of the blue part
+  for (int i = 0; i < sats && i < 24; i++) oled.drawDisc(4 + i * 5, 42, 1);
+}
+
 // ---- the carousel
 static bool pageReady(int p) {
   switch (p) {
     case P_NOW: return nowPlayingRecent() && npName[0];   // a song, game, program, video or picture
     case P_WATCH: case P_CLOCK: case P_AFFIRM: case P_COLOR: case P_EARTH: return clockOK();
     case P_WXGRAPH: return clockOK();
+    case P_GPS: return gpsRunning();
     default: return true;
   }
 }
@@ -365,6 +410,7 @@ static uint32_t pageDuration(int p) {
     case P_CLOCK: return 6000;
     case P_TEMP: return 6000;
     case P_EARTH: return 9000;
+    case P_GPS: return 9000;
     case P_WXGRAPH: return 9000;
     case P_NOW: return 10000;
     case P_AFFIRM: oled.setFont(u8g2_font_helvB12_tf); return max<uint32_t>(7000, passMs(oled.getUTF8Width(todaysAffirmation())));
@@ -397,6 +443,7 @@ static void drawScreen() {
     case P_COLOR: drawColorPage(el); break;
     case P_TEMP: drawTempPage(); break;
     case P_EARTH: drawEarthPage(); break;
+    case P_GPS: drawGpsPage(); break;
     case P_WXGRAPH: drawWxGraphPage(); break;
     default: drawStatusPage(); break;
   }

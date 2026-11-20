@@ -44,6 +44,11 @@ app = re.sub(r",(\s*\];\s*\nconst TOOL_LABELS)", r"\1", app)   # no trailing com
 coms_label = "Meshed Comms"
 app, n1 = re.subn(r"(\n(\s*)\{ key: 'tidysuite',)", r"\n\2{ key: 'coms', label: '" + coms_label + r"', color: '#E2725B' },\1", app, count=1)
 app, n2 = re.subn(r"(else if \(key === 'tidysuite'\) loadTidySuiteView\(\);)", r"\1\n  else if (key === 'coms') window.loadComsView();", app, count=1)
+if board == "V4":   # GPS, at the bottom: a V4 with Heltec's GPS kit on its GNSS connector (board.js draws it)
+    app, n3 = re.subn(r"(\n(\s*)\{ key: 'tidysuite',[^\n]*\})", r"\1,\n\2{ key: 'gps', label: 'GPS', color: '#3AA0FF' }", app, count=1)
+    app, n4 = re.subn(r"(else if \(key === 'coms'\) window\.loadComsView\(\);)", r"\1\n  else if (key === 'gps') window.loadGpsView();", app, count=1)
+    if not (n3 and n4):
+        sys.exit("Couldn't add the GPS tab to app.js -- The Shelf's layout changed; update pack_www.py")
 if not (n1 and n2):
     sys.exit("Couldn't add the Meshed Comms tab to app.js -- The Shelf's layout changed; update pack_www.py")
 # a seventh shelf, MIDI: listed, uploaded and played like Music (board-ui/midi.js plays the files)

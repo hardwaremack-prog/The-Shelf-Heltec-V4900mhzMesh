@@ -82,6 +82,9 @@ if '<option value="MIDI">' not in html:
 label = "ESP32" if board == "ESP32" else f"Heltec {board}"
 html = html.replace('\n<script src="mesh-coms.js"></script>', '', 1)   # the computer's Mesh Coms (boards have Coms)
 (stage / "mesh-coms.js").unlink(missing_ok=True)
+for f in ("oled-sim-data.js", "oled-sim.js"):   # the simulated screen on Home: boards have the real one
+    html = html.replace(f'\n<script src="{f}"></script>', '', 1)
+    (stage / f).unlink(missing_ok=True)
 html = html.replace("<title>The Shelf</title>", f"<title>The Shelf · {label}</title>", 1)
 if "board.js" not in html or "board.css" not in html:
     sys.exit("Couldn't add board.js/board.css to index.html")

@@ -812,3 +812,29 @@
     } catch (e) {}
   };
 })();
+
+// ---- Home page weather, the board's way ----
+// The Shelf asks the browser where it is, but browsers only answer secure (https) pages and a
+// board is plain http, so the weather never showed. The board knows where it is (from its
+// settings page, or from your internet address) and answers /api/weather without one.
+(function () {
+  if (typeof loadWeatherWidget !== 'function') return;
+  window.loadWeatherWidget = loadWeatherWidget = async function () {
+    const pill = document.getElementById('weatherPill');
+    if (!pill) return;
+    const show = data => {
+      const p = document.getElementById('weatherPill');
+      if (!p) return;
+      p.innerHTML = `${data.icon} <strong>${data.tempF}&deg;F</strong> ${escapeHtml(data.condition)}`;
+      p.title = `${data.tempC}°C — ${escapeHtml(data.condition)}`;
+    };
+    try {
+      const res = await fetch('/api/weather');
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Weather unavailable.');
+      show(data);
+    } catch {
+      const p = document.getElementById('weatherPill'); if (p) p.remove();
+    }
+  };
+})();

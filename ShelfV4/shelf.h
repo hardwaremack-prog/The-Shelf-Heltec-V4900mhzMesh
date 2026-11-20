@@ -215,7 +215,8 @@ void screenShowing(const String& cat, const String& file);
 void wxRemember(double lat, double lon);
 bool wxLocation(float& lat, float& lon);
 int wxHistoryCopy(float* out, int max, uint32_t* startUtc);   // hourly °F, oldest first
-void wxHistoryTick();   // something opened from a shelf: show its name on the screen
+void wxHistoryTick();
+const char* wxStatusText();   // something opened from a shelf: show its name on the screen
 void screenSleep();
 bool screenIsOn();
 

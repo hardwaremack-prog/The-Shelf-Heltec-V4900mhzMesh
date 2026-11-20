@@ -288,7 +288,15 @@ static void drawEarthPage() {
 static void drawWxGraphPage() {
   static float v[WX_HOURS]; uint32_t start = 0;
   int n = wxHistoryCopy(v, WX_HOURS, &start);
-  if (n < 2) return;
+  if (n < 2) {                                      // nothing yet: say why, so the page isn't a mystery
+    header("OUTSIDE \xB7 LAST 4 DAYS");
+    oled.setFont(u8g2_font_6x10_tf);
+    drawPass(34, "Outside temperature", 0);
+    oled.setFont(u8g2_font_5x7_tf);
+    const char* m = wxStatusText();
+    oled.drawStr(max(0, (128 - (int)oled.getStrWidth(m)) / 2), 58, m);
+    return;
+  }
   float lo = v[0], hi = v[0];
   for (int i = 1; i < n; i++) { lo = min(lo, v[i]); hi = max(hi, v[i]); }
   float dlo = lo, dhi = hi;
@@ -345,7 +353,7 @@ static bool pageReady(int p) {
   switch (p) {
     case P_NOW: return nowPlayingRecent() && npName[0];   // a song, game, program, video or picture
     case P_WATCH: case P_CLOCK: case P_AFFIRM: case P_COLOR: case P_EARTH: return clockOK();
-    case P_WXGRAPH: { static float v[2]; return clockOK() && wxHistoryCopy(v, 2, nullptr) >= 2; }
+    case P_WXGRAPH: return clockOK();
     default: return true;
   }
 }

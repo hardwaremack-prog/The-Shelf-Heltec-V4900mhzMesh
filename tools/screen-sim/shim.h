@@ -84,4 +84,5 @@ static int wxHistoryCopy(float* out, int max, uint32_t* startUtc) {
   return n;
 }
 static bool wxLocation(float& lat, float& lon) { lat = 42.33f; lon = -83.05f; return true; }
+static const char* wxStatusText() { return "Getting them..."; }
 static void screenWake() {}

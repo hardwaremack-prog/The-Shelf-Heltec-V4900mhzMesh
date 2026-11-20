@@ -296,6 +296,11 @@ bool handleLocationApi(AsyncWebServerRequest* r, const String& url, WebRequestMe
   sendDoc(r, o);
   return true;
 }
+const char* wxStatusText() {                        // the screen's graph page, while it has nothing to draw
+  if (!staOK) return "Needs home Wi-Fi";
+  if (wxErr.length()) return "Couldn't get them yet";
+  return "Getting them...";
+}
 bool wxLocation(float& lat, float& lon) { wxOpen(); lat = wxLat; lon = wxLon; return !isnan(wxLat); }
 int wxHistoryCopy(float* out, int max, uint32_t* startUtc) {
   portENTER_CRITICAL(&histMux);
@@ -368,9 +373,16 @@ static String wxData; static uint32_t wxAt = 0;
 static void weather(AsyncWebServerRequest* r) {
   double lat = r->hasParam("lat") ? r->getParam("lat")->value().toDouble() : NAN;
   double lon = r->hasParam("lon") ? r->getParam("lon")->value().toDouble() : NAN;
-  if (isnan(lat) || isnan(lon) || !r->hasParam("lat") || !r->hasParam("lon")) return sendErr(r, 400, "Missing or invalid location.");
+  if (r->hasParam("lat") && r->hasParam("lon") && !isnan(lat) && !isnan(lon)) {
+    wxRemember(lat, lon);                           // the screen's temperature graph and earth map use it
+  } else {
+    // no location from the browser (they only share it over https): the board's own
+    wxOpen();
+    if (isnan(wxLat) && staOK) ipLocate();
+    if (isnan(wxLat)) return sendErr(r, 400, "The board doesn't know where it is yet. Set its location on the board's settings page.");
+    lat = wxLat; lon = wxLon;
+  }
   char key[32]; snprintf(key, sizeof key, "%.2f,%.2f", lat, lon);
-  wxRemember(lat, lon);                             // the screen's temperature graph and earth map use it
   if (wxKey == key && wxData.length() && millis() - wxAt < 600000) return sendJson(r, 200, wxData);
   if (!staOK) return sendErr(r, 502, "Couldn't reach the weather service -- the board isn't on your home Wi-Fi yet.");
   HTTPClient http;

@@ -476,6 +476,7 @@ static String sanitizeHost(String h) {
 // Board settings for the little setup page at /board/
 bool handleBoardApi(AsyncWebServerRequest* r, const String& url, WebRequestMethod m) {
   if (!url.startsWith("/api/board/")) return false;
+  if (handleLocationApi(r, url, m)) return true;   // (its own GET and POST; api_tools.cpp)
   if (url == "/api/board/info") {
     String s = String("{\"board\":\"") + BOARD_NAME + "\",\"fw\":\"" FW_VERSION "\",\"storage\":\"" + (onSD ? "microSD card" : "board flash") +
       "\",\"total\":" + String((double)storeTotal, 0) + ",\"used\":" + String((double)storeUsed, 0) + ",\"host\":\"" + hostName +

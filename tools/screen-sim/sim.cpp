@@ -45,7 +45,7 @@ int main() {
   shot(P_AFFIRM, 0, "affirmation.txt");
   shot(P_CLOCK, 100, "clock.txt");
   shot(P_COLOR, 0, "color.txt");
-  fakeMillis = 0; shot(P_EARTH, 0, "earth.txt");
+  fakeMillis = 500; shot(P_EARTH, 0, "earth.txt");
   shot(P_WXGRAPH, 0, "outside.txt");
   fakeMillis = (2 * 24 * 60 + 3 * 60 + 12) * 60000u;   // up 2 days, 3 hours
   shot(P_TEMP, 0, "temperature.txt");

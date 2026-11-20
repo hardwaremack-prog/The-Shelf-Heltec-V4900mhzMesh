@@ -230,7 +230,7 @@ static void drawTempPage() {
   oled.drawUTF8((128 - oled.getUTF8Width(b)) / 2, 63, b);
 }
 
-// The sunlit earth: the world map with day and night as they are right now. Land in daylight is
+// The sunlit earth: the world map (80°N to 60°S: the far north and Antarctica are left off) with day and night as they are right now. Land in daylight is
 // solid, in twilight half-lit, at night dim; the line between day and night is dotted across the
 // oceans; the sun sits over the spot where it's straight overhead; where the board is blinks.
 static void sunPosition(time_t t, float& decl, float& subLon) {
@@ -249,7 +249,7 @@ static void drawEarthPage() {
   static float cosCol[128];
   for (int x = 0; x < 128; x++) cosCol[x] = cosf(((-180 + (x + 0.5f) * 360 / 128) - subLon) * (float)M_PI / 180);
   for (int y = 0; y < 64; y++) {
-    float lat = (90 - (y + 0.5f) * 180 / 64) * (float)M_PI / 180, a = sinf(lat) * sd, b = cosf(lat) * cd;
+    float lat = (WORLD_TOP - (y + 0.5f) * (WORLD_TOP - WORLD_BOTTOM) / 64) * (float)M_PI / 180, a = sinf(lat) * sd, b = cosf(lat) * cd;
     for (int x = 0; x < 128; x++) {
       float z = a + b * cosCol[x];                                         // the sun's height there (sine)
       bool land = (WORLD_MAP[y][x >> 3] >> (7 - (x & 7))) & 1;
@@ -259,12 +259,12 @@ static void drawEarthPage() {
       if (on) oled.drawPixel(x, y);
     }
   }
-  int sx = (int)lroundf((subLon + 180) * 128 / 360), sy = (int)lroundf((90 - decl * 180 / (float)M_PI) * 64 / 180);
+  int sx = (int)lroundf((subLon + 180) * 128 / 360), sy = (int)lroundf((WORLD_TOP - decl * 180 / (float)M_PI) * 64 / (WORLD_TOP - WORLD_BOTTOM));
   oled.setDrawColor(0); oled.drawDisc(sx, sy, 4); oled.setDrawColor(1);
   oled.drawCircle(sx, sy, 3); oled.drawDisc(sx, sy, 1);                      // the sun
   float hl, ho;
   if (wxLocation(hl, ho) && (millis() / 500) % 2) {                         // here, blinking
-    int hx = (int)lroundf((ho + 180) * 128 / 360), hy = (int)lroundf((90 - hl) * 64 / 180);
+    int hx = (int)lroundf((ho + 180) * 128 / 360), hy = (int)lroundf((WORLD_TOP - hl) * 64 / (WORLD_TOP - WORLD_BOTTOM));
     oled.setDrawColor(0); oled.drawBox(hx - 2, hy - 2, 5, 5); oled.setDrawColor(1);
     oled.drawHLine(hx - 2, hy, 5); oled.drawVLine(hx, hy - 2, 5);
   }

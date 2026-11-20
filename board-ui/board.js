@@ -88,28 +88,9 @@
     if (window.shelfLocksRefresh) window.shelfLocksRefresh();
   }
   function renderSwitches() {
-    const ro = toggleRow('bdRoRow', async (on, cb) => {
-      if (on) {
-        if (!A.adminSet) {
-          cb.checked = false;
-          if (confirm('Read-only mode needs an admin password, so it can be unlocked again. Set one on the board\'s settings page now?')) location.href = '/board/';
-          return;
-        }
-        const r = await post('/api/admin/readonly', { on: true });
-        if (!r.ok) cb.checked = false;
-        await afterChange();
-      } else if (A.unlocked) {
-        await post('/api/admin/readonly', { on: false }); await afterChange();
-      } else {
-        cb.checked = true;
-        askPw('Turn read-only off', 'Enter the admin password. Everyone on the Wi-Fi will be able to make changes again.', 'Turn off', '/api/admin/readonly', { on: false });
-      }
-    });
-    if (ro) {
-      ro.querySelector('input').checked = !!A.readOnly;
-      ro.querySelector('.bt-label').textContent = A.readOnly ? 'Read-only: on' : 'Read-only: off';
-      ro.title = 'While on, everyone can look, play and chat, but only the admin can upload, change or delete';
-    }
+    // (Read-only mode, which stops changes, is on the board's settings page. The switch here is
+    // Read control, from locks.js: chosen shelves need a password to look at.)
+    const old = document.getElementById('bdRoRow'); if (old) old.remove();
     const ad = A.adminSet ? toggleRow('bdAdminRow', async (on, cb) => {
       if (on) { cb.checked = false; unlock(false); }
       else { await lock(); if (window.shelfLocksRefresh) window.shelfLocksRefresh(); }
@@ -118,7 +99,7 @@
       ad.hidden = false;
       ad.querySelector('input').checked = !!A.unlocked;
       ad.querySelector('.bt-label').textContent = A.unlocked ? 'Admin: unlocked here' : 'Admin: locked';
-      ad.title = 'Unlock with the admin password to make changes and manage folder locks from this browser (8 hours)';
+      ad.title = 'Unlock with the admin password to make changes and set Read control from this browser (8 hours)';
     } else { const r = document.getElementById('bdAdminRow'); if (r) r.hidden = true; }
   }
 

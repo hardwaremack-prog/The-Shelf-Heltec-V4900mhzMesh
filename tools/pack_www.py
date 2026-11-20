@@ -95,6 +95,11 @@ if lk.exists():
         ("Other devices can look once they enter it, but can never change locked folders — only this computer can. This computer is never asked.",
          "Others can look once they enter it, but can never change locked folders: only the admin can (a browser unlocked with the admin password), and the admin is never asked."),
         ("Backups are host-only while any lock is on.", "Card backups are admin-only while any lock is on."),
+        # on a board it's "Read control": shelves (and tools) that need a password just to look at
+        ("'Read-only password: on' : 'Read-only password: off'", "'Read control: on' : 'Read control: off'"),
+        ("'\U0001F512 Folder locks'", "'\U0001F512 Read control'"),
+        ("'\U0001F512 Folder locks\u2026'", "'\U0001F512 Read control: shelves\u2026'"),
+        ("Tick what should need the viewing password.", "Tick the shelves and tools that need a password just to look at."),
     ]:
         if a not in t: sys.exit("pack_www: locks.js wording changed -- update the board's replacements")
         t = t.replace(a, b)

@@ -227,7 +227,7 @@ On by default (board settings page, **Power**). When nobody has used the board f
 
 ## Folder locks
 
-The same folder locks as The Shelf on a computer: put chosen shelves (say Pictures) and tools (Notes, Docs, Sheets, Slides, Draw, Messages) behind a **viewing password**. Anyone else has to enter it to look, for 2 hours at a time, and locked folders are always read-only for them. On a board, the **admin** is the host: set an admin password on the board's settings page and unlock that browser as the admin, then use **Folder locks…** and the **Read-only password** switch in The Shelf's sidebar. Card backups are admin-only while any lock is on. Clearing the admin password with the button also turns the locks off.
+The same folder locks as The Shelf on a computer: put chosen shelves (say Pictures) and tools (Notes, Docs, Sheets, Slides, Draw, Messages) behind a **viewing password**. Anyone else has to enter it to look, for 2 hours at a time, and locked folders are always read-only for them. On a board, the **admin** is the host: set an admin password on the board's settings page and unlock that browser as the admin, then use the **Read control** switch and **Read control: shelves…** at the top of The Shelf's sidebar (on a board, folder locks are called Read control). Card backups are admin-only while any lock is on. Clearing the admin password with the button also turns the locks off.
 
 ## Messages between Shelves
 

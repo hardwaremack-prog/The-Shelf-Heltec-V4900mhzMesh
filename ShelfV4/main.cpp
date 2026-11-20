@@ -77,7 +77,13 @@ static bool probeOLED(int sda = OLED_SDA, int scl = OLED_SCL) {
 // The V4 powers its screen through a "Vext" switch: GPIO36 on the standard V4,
 // GPIO40 on the V4-R8 (whose GPIO33-37 belong to its PSRAM, so they're never touched
 // in the R8 build). Heltec's docs disagree on the switch's polarity, so try both.
-static bool tryVext(int pin, int level) { pinMode(pin, OUTPUT); digitalWrite(pin, level); delay(60); return probeOLED(); }
+static int vextPin = -1, vextOnLevel = LOW;      // what powers the screen (and the V4's GNSS connector)
+static bool tryVext(int pin, int level) {
+  pinMode(pin, OUTPUT); digitalWrite(pin, level); delay(60);
+  bool ok = probeOLED();
+  if (ok) { vextPin = pin; vextOnLevel = level; }
+  return ok;
+}
 
 static void powerOLED() {
 #if defined(SHELF_ESP32)
@@ -420,14 +426,24 @@ static void wifiScanTick() {
 #define WAKE_BUTTON "PRG"
 #endif
 static uint32_t sleepAt = 0, sleepMinutes = 0;
+static bool poweringOff = false;            // "Power off": deep sleep with everything it can switch off
 static void goDeepSleep() {
   Serial.printf("[shelf] deep sleep %s\n", sleepMinutes ? (String("for ") + sleepMinutes + " min or until " WAKE_BUTTON).c_str() : "until " WAKE_BUTTON);
-  if (sleepMinutes) oledMsg("Deep sleep", "Press " WAKE_BUTTON " to wake", (String("or in ") + sleepMinutes + " min").c_str());
+  if (poweringOff) oledMsg("Powered off", "Press " WAKE_BUTTON " to", "turn it back on");
+  else if (sleepMinutes) oledMsg("Deep sleep", "Press " WAKE_BUTTON " to wake", (String("or in ") + sleepMinutes + " min").c_str());
   else oledMsg("Deep sleep", "Press " WAKE_BUTTON " to wake");
   delay(1500);
   oledPower(1);
   comsSleep();
+  gpsSleep();
   ledOff();
+  if (vextPin >= 0) {                        // the screen's power (and the GNSS connector's) off, and kept off
+    digitalWrite(vextPin, vextOnLevel == LOW ? HIGH : LOW);
+    gpio_hold_en((gpio_num_t)vextPin); gpio_deep_sleep_hold_en();
+  }
+#ifdef OLED_INLINE_VCC
+  if (oledInline) { digitalWrite(OLED_INLINE_VCC, LOW); gpio_hold_en((gpio_num_t)OLED_INLINE_VCC); gpio_deep_sleep_hold_en(); }
+#endif
   WiFi.disconnect(true); WiFi.mode(WIFI_OFF);
   if (onSD) SD.end();
   Serial.flush();
@@ -593,6 +609,10 @@ bool handleBoardApi(AsyncWebServerRequest* r, const String& url, WebRequestMetho
     if (mins < 0 || mins > 7L * 24 * 60) { sendErr(r, 400, "Pick up to a week."); return true; }
     sleepMinutes = (uint32_t)mins; sleepAt = millis() + 1500;
     sendJson(r, 200, String("{\"ok\":true,\"minutes\":") + mins + "}"); return true;
+  }
+  if (url == "/api/board/poweroff") {        // off until the button is pressed (or EN/RST, or the power plugged in again)
+    poweringOff = true; sleepMinutes = 0; sleepAt = millis() + 1500;
+    sendJson(r, 200, "{\"ok\":true}"); return true;
   }
   if (url == "/api/board/reboot") { sendJson(r, 200, "{\"ok\":true}"); rebootSoon = true; return true; }
   return false;
@@ -819,6 +839,14 @@ bool remoteBoardCommand(uint8_t cmd, const String& arg, String& out) {
 // ------------------------------------------------------------ setup / loop
 void setup() {
   Serial.begin(115200);
+  gpio_deep_sleep_hold_dis();                 // let go of pins held through a power-off
+#if defined(SHELF_ESP32)
+  gpio_hold_dis((gpio_num_t)OLED_INLINE_VCC);
+#elif CONFIG_SPIRAM_MODE_OCT
+  gpio_hold_dis((gpio_num_t)PIN_VEXT_R8);
+#else
+  gpio_hold_dis((gpio_num_t)PIN_VEXT);
+#endif
   // Unzipping a big game or listing a huge shelf can keep the web task busy for a while;
   // don't let core 0's idle watchdog reset the board over it.
   disableCore0WDT();

@@ -145,10 +145,17 @@ static void sentence(const char* s) {
   }
 }
 
+// deep sleep / power off: the GPS off, and held off while the board sleeps
+void gpsSleep() {
+  if (!havePins()) return;
+  gpsStop(); powerPins(false);
+  gpio_hold_en((gpio_num_t)GNSS_EN); gpio_deep_sleep_hold_en();
+}
 bool gpsAvailable() { return havePins(); }
 bool gpsFix() { return started && G.fix && lastFix && millis() - lastFix < 10000; }
 
 void gpsBegin() {
+  gpio_hold_dis((gpio_num_t)GNSS_EN);                       // (held off through a power-off)
   gp.begin("gps", false);
   gpsOn = gp.getBool("on", false);
   if (!havePins()) return;                                   // (don't touch 39-42: they're the card's)
@@ -234,6 +241,7 @@ bool handleGpsApi(AsyncWebServerRequest* r, const String& url, WebRequestMethod 
 #else
 // no GNSS connector on this board (V3, V4-R8, plain ESP32)
 bool gpsAvailable() { return false; }
+void gpsSleep() {}
 bool gpsFix() { return false; }
 bool gpsRunning() { return false; }
 bool gpsTalking() { return false; }

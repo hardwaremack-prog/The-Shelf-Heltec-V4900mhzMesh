@@ -220,7 +220,7 @@ void wxHistoryTick();
 void wxFromGps(double lat, double lon);                 // the GPS knows exactly where the board is
 // gps.cpp: Heltec's GPS kit on the V4's GNSS connector
 extern bool sdOnAlt;                                    // the card is on CS 4 / MISO 6 / CLK 47 / MOSI 48
-void gpsBegin(); void gpsTick();
+void gpsBegin(); void gpsTick(); void gpsSleep();
 bool gpsAvailable(); bool gpsFix(); bool gpsRunning(); bool gpsTalking();
 bool gpsScreen(double& lat, double& lon, float& altM, float& kmh, int& sats, int& view);
 bool handleGpsApi(AsyncWebServerRequest* r, const String& url, WebRequestMethod m);

@@ -171,7 +171,8 @@ label.l{font-size:13px;color:var(--muted)}
   <p class="tip">The biggest power users after that: <b>Meshed Comms</b> (its radio listens all the time; switch it off in the Coms tab when you don't need it), the board's <b>own Wi-Fi</b> (it can't nap while phones may join), and the <b>screen</b> (let it sleep after 5 minutes, above).</p>
   <div class="msg" id="pwrMsg"></div>
 
-  <div class="btns" style="margin-top:24px"><button onclick="reboot()">Restart the board</button></div>
+  <div class="btns" style="margin-top:24px"><button onclick="reboot()">Restart the board</button><button class="bad" onclick="powerOff()">Power off</button></div>
+  <p class="tip">Power off switches everything off it can: Wi-Fi, Meshed Comms, the GPS, the screen and the light. Nobody can reach it until you press its PRG button (or EN/RST, or unplug and plug it back in). It still draws a tiny trickle from a battery, so unplug the battery to store it for weeks.</p>
   <p class="tip">Hold PRG for 6 seconds and let go to forget the Wi-Fi and go back to setup mode. Keep holding to 12 seconds to clear a forgotten admin password and turn read-only off.</p>
 </div>
 <script>
@@ -264,6 +265,8 @@ async function locFind(){const q=$('#locQ').value.trim();const box=$('#locList')
 async function locAuto(){try{await post('/api/board/location',{auto:true});locLoad()}catch(e){$('#locMsg').textContent=e.message}}
 async function setPower(){try{await post('/api/board/powersave',{on:$('#pwrMode').value==='on'});$('#pwrMsg').textContent='Saved.'}catch(e){$('#pwrMsg').textContent=e.message;$('#pwrMsg').className='msg err'}}
 async function setScreen(){try{await post('/api/board/screen',{sleep:$('#scrMode').value==='sleep'});$('#scrMsg').textContent='Saved.'}catch(e){$('#scrMsg').textContent=e.message;$('#scrMsg').className='msg err'}}
+async function powerOff(){if(!confirm('Power the board off? Nobody can reach it until you press its PRG button.'))return;
+  try{await post('/api/board/poweroff');document.body.innerHTML='<div style="padding:40px;font:18px sans-serif;text-align:center">The board is powering off.<br><br>Press its PRG button to turn it back on, then reload this page.</div>'}catch(e){alert(e.message)}}
 async function reboot(){if(!confirm('Restart the board?'))return;await post('/api/board/reboot');$('#wMsg').textContent='Restarting… give it 15 seconds.'}
 // ---- microSD backup / restore ----
 let cardBusy=false;

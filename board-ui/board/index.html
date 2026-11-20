@@ -67,7 +67,7 @@ label.l{font-size:13px;color:var(--muted)}
   <h2>Admin password &amp; read-only</h2>
   <div class="card" id="adm"><div class="empty">Loading&hellip;</div></div>
   <div id="admSet" class="panel" style="display:none">
-    <p class="tip">Set an admin password to use read-only mode, and to manage this board from another Shelf board over 900MHz Coms. Use the same one on all your boards if you like.</p>
+    <p class="tip">Set an admin password to use read-only mode, and to manage this board from another Shelf board over Meshed Comms. Use the same one on all your boards if you like.</p>
     <div class="stack" style="margin-top:8px">
       <input id="newPw" type="password" placeholder="Admin password (6+ characters)" autocomplete="new-password">
       <input id="newPw2" type="password" placeholder="Type it again" autocomplete="new-password">
@@ -168,7 +168,7 @@ label.l{font-size:13px;color:var(--muted)}
   <div class="btns"><select id="pwrMode" style="flex:1;min-width:160px" onchange="setPower()">
     <option value="on">Power saving (recommended)</option><option value="off">Always full speed</option>
   </select></div>
-  <p class="tip">The biggest power users after that: <b>900MHz Coms</b> (its radio listens all the time; switch it off in the Coms tab when you don't need it), the board's <b>own Wi-Fi</b> (it can't nap while phones may join), and the <b>screen</b> (let it sleep after 5 minutes, above).</p>
+  <p class="tip">The biggest power users after that: <b>Meshed Comms</b> (its radio listens all the time; switch it off in the Coms tab when you don't need it), the board's <b>own Wi-Fi</b> (it can't nap while phones may join), and the <b>screen</b> (let it sleep after 5 minutes, above).</p>
   <div class="msg" id="pwrMsg"></div>
 
   <div class="btns" style="margin-top:24px"><button onclick="reboot()">Restart the board</button></div>

@@ -39,13 +39,13 @@ for key in ("ai", "bigfiles", "mesh"):   # (mesh: the computer's way into Coms; 
 if app == before:
     sys.exit("Couldn't find the TOOLS list in app.js -- The Shelf's layout changed; update pack_www.py")
 app = re.sub(r",(\s*\];\s*\nconst TOOL_LABELS)", r"\1", app)   # no trailing comma left behind
-# add the board's own tab: 900MHz Coms (drawn by board.js). A plain ESP32 has no LoRa radio.
+# add the board's own tab: Meshed Comms (drawn by board.js). A plain ESP32 has no LoRa radio.
 # (a plain ESP32 has no LoRa radio: its Coms run over 2.4 GHz only, and the tab says so)
-coms_label = "2.4GHz Mesh Coms" if board == "ESP32" else "900MHz Coms"
+coms_label = "Meshed Comms"
 app, n1 = re.subn(r"(\n(\s*)\{ key: 'tidysuite',)", r"\n\2{ key: 'coms', label: '" + coms_label + r"', color: '#E2725B' },\1", app, count=1)
 app, n2 = re.subn(r"(else if \(key === 'tidysuite'\) loadTidySuiteView\(\);)", r"\1\n  else if (key === 'coms') window.loadComsView();", app, count=1)
 if not (n1 and n2):
-    sys.exit("Couldn't add the 900MHz Coms tab to app.js -- The Shelf's layout changed; update pack_www.py")
+    sys.exit("Couldn't add the Meshed Comms tab to app.js -- The Shelf's layout changed; update pack_www.py")
 # a seventh shelf, MIDI: listed, uploaded and played like Music (board-ui/midi.js plays the files)
 def must(pattern, repl, count=1):
     global app
@@ -124,10 +124,10 @@ if board != "V4":
                           "With a screen added (SSD1306 on GPIO 21/22), it sleeps after 5 minutes; press BOOT to wake it.")
             t = t.replace("Hold PRG for 6 seconds and let go to forget the Wi-Fi and go back to setup mode.",
                           "Hold BOOT for 6 seconds and let go to forget the home Wi-Fi and go back to its own Wi-Fi (named after the board, password theshelf) at http://10.1.1.250.")
-            t = t.replace("<b>900MHz Coms</b> (its radio listens all the time;", "<b>2.4GHz Mesh Coms</b> (it keeps the Wi-Fi radio listening;")
+            t = t.replace("<b>Meshed Comms</b> (its radio listens all the time;", "<b>Meshed Comms</b> (it keeps the Wi-Fi radio listening;")
             t = t.replace("Hold PRG", "Hold BOOT")
             t = t.replace("PRG", "BOOT")                    # (deep sleep and any other mention of the button)
-            t = t.replace("const BAND_NAME = '900MHz Coms';", "const BAND_NAME = '2.4GHz Mesh Coms';")
+            t = t.replace("const NOLORA = false;", "const NOLORA = true; ")
         f.write_text(t, encoding="utf-8")
 
 try:

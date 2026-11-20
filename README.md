@@ -17,7 +17,7 @@
 | Notes, Docs, Sheets, Slides, Draw | Online album-art lookup, tag editing, Standardize names, Remove duplicates, Export |
 | Tidy Suite | Big Transfer, backup/restore zips, spreadsheet import |
 | **Messages**: finds and chats with your other Shelves (PCs, Pis, other boards), pictures included | User accounts (the board has one admin password instead) |
-| **900MHz Coms**: LoRa text mesh between boards, every board a relay, 12-hour catch-up, list of boards and remote admin | |
+| **Meshed Comms**: LoRa text mesh between boards, every board a relay, 12-hour catch-up, list of boards and remote admin | |
 | **Read-only mode** with an admin password to unlock changes | |
 
 The buttons for those computer-only features are hidden on the board, and the AI and Big Transfer tabs are left out.
@@ -59,7 +59,7 @@ With no card, The Shelf keeps files in the board's own flash: about 9 MB on a V4
 
 ### On a Heltec V3
 
-The V3 gets the same Shelf, the same tabs and the same 900MHz Coms. Its mesh settings match the V4's, so **V3 and V4 boards are on one mesh**, relaying and catching each other up. The differences:
+The V3 gets the same Shelf, the same tabs and the same Meshed Comms. Its mesh settings match the V4's, so **V3 and V4 boards are on one mesh**, relaying and catching each other up. The differences:
 
 - **Transmit power.** The V3 has no front-end amplifier, so its levels are Low ~11, Normal ~17 and High ~22 dBm (the V4 reaches ~27). The tab shows the right numbers for each board.
 - **Memory.** The V3 has no PSRAM, so it keeps the newest 150 Coms messages on screen (the V4 keeps 300). The full log stays on the card. Give it a little longer with lots of people browsing at once.
@@ -77,15 +77,15 @@ Your shelves are normal folders at the top of the card: `Pictures`, `Music`, `MI
 3. The setup page opens (or go to `http://10.1.1.250`). Tap **Find networks**, pick your Wi-Fi and enter its password.
 4. Back on your home Wi-Fi, open the address on the screen, or **`http://shelf-v4-xxxx.local`**.
 
-### 900MHz Coms (LoRa mesh between boards)
+### Meshed Comms (LoRa mesh between boards)
 
-A **900MHz Coms** tab in The Shelf's Tools lets Shelf boards (V4 and V3) text each other over their LoRa radios, with no Wi-Fi or internet between them.
+A **Meshed Comms** tab in The Shelf's Tools lets Shelf boards (V4 and V3) text each other over their LoRa radios, with no Wi-Fi or internet between them.
 
-Every board also sends and hears the same packets over **2.4 GHz** (ESP-NOW broadcast frames, no router needed, phones can stay joined to a board's own Wi-Fi). Plain ESP32 boards mesh over 2.4 GHz only, through a **2.4GHz Mesh Coms** tab; Heltec boards send on both and relay between them, so it's one mesh. Over 2.4 GHz boards must share a Wi-Fi channel (channel 1 on their own Wi-Fi). Store and forward: besides asking for the last 12 hours when Coms comes on, a board asks again whenever it meets a board it hasn't heard for 20 minutes, so messages move with people carrying boards.
+Every board also sends and hears the same packets over **2.4 GHz** (ESP-NOW broadcast frames, no router needed, phones can stay joined to a board's own Wi-Fi). Plain ESP32 boards mesh over 2.4 GHz only, through a **Meshed Comms** tab; Heltec boards send on both and relay between them, so it's one mesh. Over 2.4 GHz boards must share a Wi-Fi channel (channel 1 on their own Wi-Fi). Store and forward: besides asking for the last 12 hours when Coms comes on, a board asks again whenever it meets a board it hasn't heard for 20 minutes, so messages move with people carrying boards.
 
-![900MHz Coms tab: on, with the message log, who's in range, and settings](docs/screenshots/coms-desktop.png)
+![Meshed Comms tab: on, with the message log, who's in range, and settings](docs/screenshots/coms-desktop.png)
 
-<p align="center"><img src="docs/screenshots/coms-phone.png" width="300" alt="900MHz Coms on an iPhone"></p>
+<p align="center"><img src="docs/screenshots/coms-phone.png" width="300" alt="Meshed Comms on an iPhone"></p>
 
 - **On/off switch.** When it's on, the tab shows the message log and a box to send to everyone on the mesh (180 characters per message).
 - **Every board is a relay.** Anything new a board hears, it re-sends once after a short random wait, so messages hop board to board as far as the mesh reaches (no hop limit). Message IDs are remembered so nothing loops, and boards listen before talking.
@@ -128,7 +128,7 @@ Manage any board on the mesh from any other, with no Wi-Fi or internet between t
 <p align="center"><img src="docs/screenshots/remote-admin.png" width="520" alt="Managing the Truck board over 900MHz"></p>
 
 1. On the board you want to manage, set an **admin password** on its settings page (`/board/`).
-2. On any other board's Shelf, open **900MHz Coms** and click that board under **Boards on the mesh**. Boards without an admin password show **No password**.
+2. On any other board's Shelf, open **Meshed Comms** and click that board under **Boards on the mesh**. Boards without an admin password show **No password**.
 3. Type its admin password and press **Connect**. Your board sends a request over the radio, and the panel fills in when the answer comes back: a few seconds when it's direct, a few more for each hop.
 
 From the panel you can see its battery, uptime, Wi-Fi, address, storage, mode and screen, and you can:
@@ -158,13 +158,13 @@ On the board's settings page, set an **admin password**. Then you can switch The
 
 <p align="center"><img src="docs/screenshots/read-only-switch.png" width="240" alt="Read-only switch in the sidebar"> &nbsp; <img src="docs/screenshots/read-only-unlock.png" width="520" alt="Unlock prompt"></p>
 
-You can turn read-only on or off remotely over 900MHz Coms too. The password isn't stored on the board, only a key made from it.
+You can turn read-only on or off remotely over Meshed Comms too. The password isn't stored on the board, only a key made from it.
 
 **Forgot it?** Hold the board's **PRG** button for 12 seconds. That clears the admin password and turns read-only off. You need the board in your hand to do it.
 
 #### Turned off
 
-![900MHz Coms switched off](docs/screenshots/coms-off.png)
+![Meshed Comms switched off](docs/screenshots/coms-off.png)
 
 ### Its own Wi-Fi (car, camping, anywhere)
 
@@ -180,9 +180,9 @@ If the board is set to join your home Wi-Fi but can't find it at power-up, it st
 
 ![The board's OLED: on your Wi-Fi, on its own Wi-Fi, and at first power-up](docs/screenshots/oled-all.png)
 
-*Left to right: on your home Wi-Fi with a 900MHz Coms message showing, on its own Wi-Fi, and first power-up setup. These were drawn by the board's own screen code with the same U8g2 library and fonts, so they show what the OLED really draws, pixel for pixel.*
+*Left to right: on your home Wi-Fi with a Meshed Comms message showing, on its own Wi-Fi, and first power-up setup. These were drawn by the board's own screen code with the same U8g2 library and fonts, so they show what the OLED really draws, pixel for pixel.*
 
-- **Top bar:** THE SHELF V4, SD or FLASH, an antenna icon while 900MHz Coms is on, and the **battery meter** with percent (`USB` when no battery is plugged in)
+- **Top bar:** THE SHELF V4, SD or FLASH, an antenna icon while Meshed Comms is on, and the **battery meter** with percent (`USB` when no battery is plugged in)
 - **Line 1:** the board's name, or its own Wi-Fi network's name
 - **Line 2:** nearby Shelves or Wi-Fi strength (on its own Wi-Fi: the password). New Coms messages show here for 15 seconds, and long ones scroll.
 - **Storage bar** with free space
@@ -223,7 +223,7 @@ The **Heltec V4** card at the bottom of The Shelf's sidebar opens the board's se
 
 ## Power saving
 
-On by default (board settings page, **Power**). When nobody has used the board for 90 seconds (no page open, nothing streaming or updating), the CPU drops from 240 to 80 MHz, and on a home Wi-Fi the Wi-Fi radio sleeps between the router's beacons, waking for each one (not while Coms is on, since boards hear each other over 2.4 GHz only while it listens). The first web request brings full speed straight back; the CPU temperature screen page shows the speed. On battery, the board also goes into deep sleep before the battery runs flat (below 3.3 V for two minutes), waking every hour to look again, or when PRG is pressed. The rest of the power goes to 900MHz Coms (its radio listens all the time), the board's own Wi-Fi (it can't nap while phones may join) and the screen.
+On by default (board settings page, **Power**). When nobody has used the board for 90 seconds (no page open, nothing streaming or updating), the CPU drops from 240 to 80 MHz, and on a home Wi-Fi the Wi-Fi radio sleeps between the router's beacons, waking for each one (not while Coms is on, since boards hear each other over 2.4 GHz only while it listens). The first web request brings full speed straight back; the CPU temperature screen page shows the speed. On battery, the board also goes into deep sleep before the battery runs flat (below 3.3 V for two minutes), waking every hour to look again, or when PRG is pressed. The rest of the power goes to Meshed Comms (its radio listens all the time), the board's own Wi-Fi (it can't nap while phones may join) and the screen.
 
 ## Folder locks
 
@@ -246,7 +246,7 @@ From v1.9 the board has two firmware slots. On its settings page, **Update firmw
 The same Shelf runs on an ESP32-WROOM dev board with 4 MB of flash. Install it with **Install on ESP32** on the installer page (hold **BOOT** while connecting if the port won't open). What's different:
 
 - **Its own Wi-Fi, no setup.** It has no screen, so it starts straight on its own network, named after the board (**shelf-esp32-xxxx**, the same as its name on the network), password `theshelf`, at **http://10.1.1.250** (phones get 10.1.1.100 and up). Joining a home Wi-Fi is optional, from its settings page. Holding BOOT 6 s puts it back on its own Wi-Fi with the default password. Every board's own Wi-Fi is named after the board, so renaming a board renames its network too.
-- **2.4GHz Mesh Coms** instead of 900MHz Coms (no LoRa radio): the same mesh, catch-up and remote admin over ESP-NOW, and Heltec boards bridge it to 900 MHz. No Bluetooth: Wi-Fi and Bluetooth share one radio and too little memory on this chip, so Bluetooth is left off and its memory goes to the web server.
+- **Meshed Comms** instead of Meshed Comms (no LoRa radio): the same mesh, catch-up and remote admin over ESP-NOW, and Heltec boards bridge it to 900 MHz. No Bluetooth: Wi-Fi and Bluetooth share one radio and too little memory on this chip, so Bluetooth is left off and its memory goes to the web server.
 - **It needs a microSD card.** The 4 MB of flash holds The Shelf (2.3 MB slot), a small update loader (`ShelfLoader/`, 384 KB) and the web app, with the top 64 KB left empty (on some boards the chip's last sector doesn't keep what the installer writes). An update over Wi-Fi saves the new firmware on the card; the board restarts into the loader, which installs it and starts The Shelf again.
 - **No screen or battery meter** unless you add an SSD1306 128×64 screen on GPIO 21 (SDA) / 22 (SCL), which it finds on its own. The BOOT button does what PRG does on a Heltec (hold 6 s: forget Wi-Fi; 12 s: clear the admin password).
 - Its name on the network is `shelf-esp32-xxxx.local`; the setup Wi-Fi is `The-Shelf-XXXX` as usual.

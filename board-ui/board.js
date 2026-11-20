@@ -170,12 +170,12 @@
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(start, 300)); else setTimeout(start, 300);
 })();
 
-// ---- 900MHz Coms: a simple LoRa text mesh between Shelf boards ----
+// ---- Meshed Comms: a simple text mesh between Shelf boards (900 MHz LoRa and 2.4 GHz) ----
 (function () {
   let timer = null, last = '', drafting = false;
   const LEVEL_NAMES = ['Low', 'Normal', 'High'];
-  const BAND_NAME = '900MHz Coms';                 // a plain ESP32 (no LoRa) calls it 2.4GHz Mesh Coms
-  const NOLORA = BAND_NAME.startsWith('2.4');
+  const BAND_NAME = 'Meshed Comms';
+  const NOLORA = false;                            // a plain ESP32: no LoRa radio, 2.4 GHz only (pack_www sets it)
   const boardLabel = b => (+b === 32 ? 'ESP32' : 'V' + (b || '?'));
   const sig = r => (r ? r + ' dBm' : '2.4 GHz');   // 0: heard over 2.4 GHz (no signal reading there)
   const ago = t => { const s = Math.max(0, (Date.now() - t) / 1000); return s < 60 ? 'just now' : s < 3600 ? Math.floor(s / 60) + ' min ago' : s < 86400 ? Math.floor(s / 3600) + ' h ago' : new Date(t).toLocaleDateString(); };

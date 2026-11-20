@@ -58,11 +58,76 @@
     return close;
   };
 
+  // The switches at the top of the sidebar, like The Shelf on a computer: read-only mode, and
+  // admin write mode in this browser. (Folder locks add their own switch below these.)
+  function toggleRow(id, onChange) {
+    let row = document.getElementById(id);
+    if (row) return row;
+    const group = document.querySelector('.power-toggle-group');
+    if (!group) return null;
+    row = document.createElement('div');
+    row.className = 'power-toggle'; row.id = id;
+    row.innerHTML = '<label class="toggle-switch"><input type="checkbox"><span class="toggle-slider"></span></label><span class="bt-label"></span>';
+    const ro = document.getElementById('bdRoRow');
+    if (id === 'bdAdminRow' && ro) ro.after(row); else group.prepend(row);
+    row.querySelector('input').addEventListener('change', e => onChange(e.target.checked, e.target));
+    return row;
+  }
+  function askPw(title, sub, button, url, body) {
+    window.shelfAskPassword(title, sub, button, async pw => {
+      const r = await post(url, Object.assign({ password: pw }, body || {}));
+      if (!r.ok) { const j = await r.json().catch(() => ({})); return j.error || 'That didn’t work.'; }
+      await afterChange(); return '';
+    });
+    const obs = new MutationObserver(() => { if (!document.querySelector('.rm-overlay')) { obs.disconnect(); load(); } });
+    obs.observe(document.body, { childList: true });
+  }
+  async function afterChange() {
+    await load();
+    if (typeof loadAuthStatus === 'function') loadAuthStatus();
+    if (window.shelfLocksRefresh) window.shelfLocksRefresh();
+  }
+  function renderSwitches() {
+    const ro = toggleRow('bdRoRow', async (on, cb) => {
+      if (on) {
+        if (!A.adminSet) {
+          cb.checked = false;
+          if (confirm('Read-only mode needs an admin password, so it can be unlocked again. Set one on the board\'s settings page now?')) location.href = '/board/';
+          return;
+        }
+        const r = await post('/api/admin/readonly', { on: true });
+        if (!r.ok) cb.checked = false;
+        await afterChange();
+      } else if (A.unlocked) {
+        await post('/api/admin/readonly', { on: false }); await afterChange();
+      } else {
+        cb.checked = true;
+        askPw('Turn read-only off', 'Enter the admin password. Everyone on the Wi-Fi will be able to make changes again.', 'Turn off', '/api/admin/readonly', { on: false });
+      }
+    });
+    if (ro) {
+      ro.querySelector('input').checked = !!A.readOnly;
+      ro.querySelector('.bt-label').textContent = A.readOnly ? 'Read-only: on' : 'Read-only: off';
+      ro.title = 'While on, everyone can look, play and chat, but only the admin can upload, change or delete';
+    }
+    const ad = A.adminSet ? toggleRow('bdAdminRow', async (on, cb) => {
+      if (on) { cb.checked = false; unlock(false); }
+      else { await lock(); if (window.shelfLocksRefresh) window.shelfLocksRefresh(); }
+    }) : null;
+    if (ad) {
+      ad.hidden = false;
+      ad.querySelector('input').checked = !!A.unlocked;
+      ad.querySelector('.bt-label').textContent = A.unlocked ? 'Admin: unlocked here' : 'Admin: locked';
+      ad.title = 'Unlock with the admin password to make changes and manage folder locks from this browser (8 hours)';
+    } else { const r = document.getElementById('bdAdminRow'); if (r) r.hidden = true; }
+  }
+
   async function load() {
     try { A = await _fetch('/api/admin/status').then(r => r.json()); } catch { return; }
+    renderSwitches();
     let pill = document.getElementById('roPill');
     const badge = document.querySelector('.board-badge');
-    if (!A.adminSet || !A.readOnly) { if (pill) pill.remove(); return; }
+    if (true) { if (pill) pill.remove(); return; }   // (the switches at the top of the sidebar do this now)
     if (!pill) {
       if (!badge) return;
       pill = document.createElement('button');
@@ -75,7 +140,7 @@
       ? '<span class="ro-dot"></span><span><b>Write mode</b><small>Unlocked in this browser · tap to lock</small></span>'
       : '<span class="ro-dot"></span><span><b>Read-only</b><small>Tap and enter the admin password to make changes</small></span>';
   }
-  async function lock() { await post('/api/admin/lock'); await load(); if (typeof loadAuthStatus === 'function') loadAuthStatus(); }
+  async function lock() { await post('/api/admin/lock'); await afterChange(); }
   function unlock(blocked) {
     if (dialogOpen) return;
     dialogOpen = true;
@@ -84,7 +149,7 @@
       'Unlock', async pw => {
         const r = await post('/api/admin/unlock', { password: pw });
         if (!r.ok) { const j = await r.json().catch(() => ({})); return j.error || 'Couldn’t unlock.'; }
-        dialogOpen = false; await load(); if (typeof loadAuthStatus === 'function') loadAuthStatus();
+        dialogOpen = false; await afterChange();
         return '';
       });
     const obs = new MutationObserver(() => { if (!document.querySelector('.rm-overlay')) { dialogOpen = false; dismissedAt = Date.now(); obs.disconnect(); } });

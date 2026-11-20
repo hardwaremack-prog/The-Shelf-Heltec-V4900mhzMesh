@@ -421,10 +421,29 @@ static void goDeepSleep() {
   esp_deep_sleep_start();
 }
 
+// ------------------------------------------------------------ keeping the home Wi-Fi
+// The ESP32's own reconnecting sometimes gives up after a dropout (a router restart, a weak
+// moment). If the home Wi-Fi has been gone for 30 seconds, join it again by hand, every 30 s;
+// after 15 minutes without it (when it had been working), restart the board.
+static bool staEverOK = false;
+static uint32_t staLostAt = 0, staRetryAt = 0;
+static void wifiWatch(uint32_t now) {
+  if (staOK) { staEverOK = true; staLostAt = 0; return; }
+  if (!wifiSSID.length() || hotspotMode || firstSetup) return;
+  if (!staLostAt) { staLostAt = now | 1; staRetryAt = now + 30000; return; }
+  if ((int32_t)(now - staRetryAt) >= 0) {
+    staRetryAt = now + 30000;
+    Serial.println("[shelf] joining the home Wi-Fi again");
+    WiFi.disconnect(false, false);
+    WiFi.begin(wifiSSID.c_str(), wifiPass.c_str());
+  }
+  if (staEverOK && now - staLostAt > 15UL * 60 * 1000) { oledMsg("Wi-Fi lost", "Restarting..."); delay(500); ESP.restart(); }
+}
+
 // ------------------------------------------------------------ power saving
 // Nobody using the board (no web requests for 90 seconds, nothing streaming or updating):
-// the CPU drops from 240 to 80 MHz, and on a home Wi-Fi the Wi-Fi radio sleeps, waking only for
-// every third of the router's beacons (not while Coms is on: boards talking over 2.4 GHz need it listening).
+// the CPU drops from 240 to 80 MHz, and on a home Wi-Fi the Wi-Fi radio sleeps between the
+// router's beacons (not while Coms is on: boards talking over 2.4 GHz need it listening).
 // The first request brings full speed straight back. On its own Wi-Fi the radio has to stay
 // awake for the phones joined to it, so there it's the CPU only.
 static bool wifiNap = false;
@@ -438,9 +457,11 @@ static void powerTick(uint32_t now) {
     slowNow = true;
   }
   bool nap = slowNow && staOK && !apActive && !comsOn();
-  // napping: the deepest Wi-Fi sleep, waking for every third router beacon (~0.3 s), so the first
-  // page load after a quiet spell can take a moment longer; then it's wide awake again
-  if (nap != wifiNap) { WiFi.setSleep(nap ? WIFI_PS_MAX_MODEM : WIFI_PS_NONE); wifiNap = nap; }
+  // napping: the radio sleeps between the router's beacons and wakes for every one, so it still
+  // hears everything addressed to it; full speed again with the first request
+  // (WIFI_PS_MAX_MODEM, which skips beacons, made the board miss the network's "who has this
+  // address?" broadcasts, so after a while nobody could reach it until it was reset)
+  if (nap != wifiNap) { WiFi.setSleep(nap ? WIFI_PS_MIN_MODEM : WIFI_PS_NONE); wifiNap = nap; }
 }
 // A battery run flat hurts it: below 3.3 V for two minutes (on battery, not USB), the board says
 // so and goes into deep sleep, waking every hour to look again (or when PRG is pressed).
@@ -692,13 +713,14 @@ static void setupServer(AsyncWebServer& s) {
 }
 
 // ------------------------------------------------------------ button
-// short press: wake the screen; when it's on, one press keeps the page for 30 s, two show the next page.
+// short press: wake the screen; when it's on, one press stops the pages turning (another starts them
+// again), two quick presses show the next page.
 // hold 6 s, then let go: forget Wi-Fi.  keep holding to 12 s: clear the admin password.
 static uint32_t btnDownAt = 0, tapAt = 0; static bool btnDown = false;
 static void handleButton() {
   bool down = digitalRead(PIN_BUTTON) == LOW; uint32_t now = millis();
   if (tapAt && !down && now - tapAt >= 450) {       // just the one press: keep this page on for 30 seconds
-    tapAt = 0; holdUntil = (now + 30000) | 1; screenWake();
+    tapAt = 0; pageHeld = !pageHeld; holdNoteAt = now | 1; screenWake();
   }
   if (down && !btnDown) { btnDown = true; btnDownAt = now; }
   uint32_t held = now - btnDownAt;
@@ -849,7 +871,8 @@ void loop() {
   uint32_t now = millis();
   if (apActive) dns.processNextRequest();
   if (!staOK && WiFi.status() == WL_CONNECTED) { onJoined(); apOffAt = now + 90000; }
-  if (staOK && WiFi.status() != WL_CONNECTED) staOK = false;
+  if (staOK && WiFi.status() != WL_CONNECTED) { staOK = false; Serial.println("[shelf] lost the home Wi-Fi"); }
+  wifiWatch(now);
   if (apActive && apOffAt && now > apOffAt && staOK && !hotspotMode) { stopAP(); apOffAt = 0; }
   if (rebootSoon) { rebootSoon = false; rebootAt = now + 1500; }
   if (rebootLaterAt && (int32_t)(now - rebootLaterAt) >= 0) { rebootLaterAt = 0; rebootAt = now; }

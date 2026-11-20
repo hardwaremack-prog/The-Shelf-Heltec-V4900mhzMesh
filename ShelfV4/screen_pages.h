@@ -3,8 +3,8 @@
 //   big clock - color of the day - CPU temperature
 // A song that starts playing takes over the screen for 30 seconds, then stays in the carousel
 // for 10 minutes. The clock pages need the time (from the internet, or from the first browser
-// that opens The Shelf). One press of the button keeps the page on for 30 seconds; two quick
-// presses show the next page.
+// that opens The Shelf). One press of the button stops the pages turning, another starts them
+// again; two quick presses show the next page.
 // Included once, from main.cpp, after drawStatusPage().
 #include "daily_gen.h"
 #include "world_map.h"
@@ -13,7 +13,8 @@ enum { P_STATUS, P_WATCH, P_NOW, P_EARTH, P_AFFIRM, P_CLOCK, P_WXGRAPH, P_COLOR,
 static int page = P_STATUS;
 static uint32_t pageAt = 0, pageLen = 10000;
 static volatile bool nextPageNow = false;
-static uint32_t holdUntil = 0;                      // one press of the button: stay on this page for 30 s
+static bool pageHeld = false;                       // one press of the button: stay on this page (another: turn again)
+static uint32_t holdNoteAt = 0;                     // when it changed, for the little note on screen
 static char npName[96] = "";
 static char npLabel[20] = "NOW PLAYING";
 static volatile bool npMusic = true;               // a song (the bars bounce) or a game, program, video, picture
@@ -383,9 +384,7 @@ static void drawScreen() {
   bool urgent = firstSetup || (!staOK && !apActive) || (comsLastAt && now - comsLastAt < 15000);
   if (urgent) { drawStatusPage(); oled.sendBuffer(); return; }
   if (nowPlayingFresh()) { drawNowPage(now - npAt); oled.sendBuffer(); return; }
-  bool held = holdUntil && (int32_t)(holdUntil - now) > 0;
-  if (skip) holdUntil = 0;
-  if (skip || (!held && now - pageAt >= pageLen) || !pageReady(page)) {
+  if (skip || (!pageHeld && now - pageAt >= pageLen) || !pageReady(page)) {   // held: two presses still turn it
     for (int i = 0; i < P_COUNT; i++) { page = (page + 1) % P_COUNT; if (pageReady(page)) break; }
     pageAt = now; pageLen = pageDuration(page);
   }
@@ -401,5 +400,13 @@ static void drawScreen() {
     case P_WXGRAPH: drawWxGraphPage(); break;
     default: drawStatusPage(); break;
   }
+  if (holdNoteAt && now - holdNoteAt < 1500) {      // "Holding" / "Turning" for a moment after a press
+    const char* t = pageHeld ? "Holding this page" : "Pages turning";
+    oled.setFont(u8g2_font_6x10_tf);
+    int w = oled.getStrWidth(t) + 8, x = (128 - w) / 2;
+    oled.setDrawColor(0); oled.drawBox(x - 1, 21, w + 2, 16); oled.setDrawColor(1);
+    oled.drawRFrame(x, 22, w, 14, 3); oled.drawStr(x + 4, 32, t);
+    scrolling = true;                               // so it goes away on time
+  } else holdNoteAt = 0;
   oled.sendBuffer();
 }

@@ -157,14 +157,14 @@ label.l{font-size:13px;color:var(--muted)}
   <div class="msg" id="locMsg"></div>
 
   <h2>Screen</h2>
-  <p class="tip">While it's on, the screen takes turns showing the board's address, a watch face, the time, the sunlit earth, the outside temperature over the last 4 days, today's affirmation, the color of the day, the CPU temperature, and the name of the song, game, program, video or picture that was just opened. Press PRG once to keep the page on for 30 seconds, or twice quickly for the next one. Opening something wakes it.</p>
+  <p class="tip">While it's on, the screen takes turns showing the board's address, a watch face, the time, the sunlit earth, the outside temperature over the last 4 days, today's affirmation, the color of the day, the CPU temperature, and the name of the song, game, program, video or picture that was just opened. Press PRG once to stay on the page you're looking at (press again to let the pages turn), or twice quickly for the next one. Opening something wakes it.</p>
   <div class="btns"><select id="scrMode" style="flex:1;min-width:160px" onchange="setScreen()">
     <option value="sleep">Sleeps after 5 minutes (PRG wakes it)</option><option value="on">Stays on</option>
   </select></div>
   <div class="msg" id="scrMsg"></div>
 
   <h2>Power</h2>
-  <p class="tip">Power saving makes a battery last longer. When nobody has used the board for 90 seconds (no page open, nothing playing), it slows its processor from 240 to 80 MHz, and on your home Wi-Fi the Wi-Fi radio goes into its low-power mode, waking only every third time the router checks in (not while Coms is on). The first page after a quiet spell can take a moment longer to open. Opening The Shelf brings full speed straight back. On battery, it also switches itself off before the battery runs flat (below 3.3 V) and looks again every hour; press PRG once it's charging.</p>
+  <p class="tip">Power saving makes a battery last longer. When nobody has used the board for 90 seconds (no page open, nothing playing), it slows its processor from 240 to 80 MHz, and on your home Wi-Fi the Wi-Fi radio sleeps between the router's check-ins (not while Coms is on). Opening The Shelf brings full speed straight back. On battery, it also switches itself off before the battery runs flat (below 3.3 V) and looks again every hour; press PRG once it's charging.</p>
   <div class="btns"><select id="pwrMode" style="flex:1;min-width:160px" onchange="setPower()">
     <option value="on">Power saving (recommended)</option><option value="off">Always full speed</option>
   </select></div>

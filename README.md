@@ -204,11 +204,11 @@ While it's on, the screen takes turns through these pages, about 6 to 10 seconds
 - **Today's affirmation** and the **color of the day**: the same ones The Shelf's Home page shows that day.
 - **CPU temperature** in °C and °F, how long the board has been on, and free memory.
 
-**Screen sleep:** by default the screen goes dark after 5 minutes (a song, game or picture opening restarts that). A short press of **PRG** (BOOT on an ESP32) wakes it, and so does **Wake** from a remote board over Coms. To keep it on all the time, set **Screen** to **Stays on** on the board's settings page. While it's on, one press keeps the page on for 30 seconds and two quick presses show the next page.
+**Screen sleep:** by default the screen goes dark after 5 minutes (a song, game or picture opening restarts that). A short press of **PRG** (BOOT on an ESP32) wakes it, and so does **Wake** from a remote board over Coms. To keep it on all the time, set **Screen** to **Stays on** on the board's settings page. While it's on, one press stays on the current page until you press again, and two quick presses show the next page.
 
 The **Heltec V4** card at the bottom of The Shelf's sidebar opens the board's settings page (`/board/`). There you can change Wi-Fi, rename the board, see storage, and restart it. There's also the admin password and read-only switch.
 
-**PRG button:** a short press wakes the screen. While it's on, one press keeps the page for 30 seconds, two quick presses show the next page. Hold it 6 seconds and let go to forget the Wi-Fi and go back to setup mode. Keep holding to 12 seconds to clear the admin password and turn read-only off.
+**PRG button:** a short press wakes the screen. While it's on, one press stays on the current page until the next press, two quick presses show the next page. Hold it 6 seconds and let go to forget the Wi-Fi and go back to setup mode. Keep holding to 12 seconds to clear the admin password and turn read-only off.
 
 ## More screenshots
 
@@ -223,7 +223,7 @@ The **Heltec V4** card at the bottom of The Shelf's sidebar opens the board's se
 
 ## Power saving
 
-On by default (board settings page, **Power**). When nobody has used the board for 90 seconds (no page open, nothing streaming or updating), the CPU drops from 240 to 80 MHz, and on a home Wi-Fi the Wi-Fi radio goes into its deepest modem sleep, waking for every third router beacon (the first page after a quiet spell can take a moment longer) (not while Coms is on, since boards hear each other over 2.4 GHz only while it listens). The first web request brings full speed straight back; the CPU temperature screen page shows the speed. On battery, the board also goes into deep sleep before the battery runs flat (below 3.3 V for two minutes), waking every hour to look again, or when PRG is pressed. The rest of the power goes to 900MHz Coms (its radio listens all the time), the board's own Wi-Fi (it can't nap while phones may join) and the screen.
+On by default (board settings page, **Power**). When nobody has used the board for 90 seconds (no page open, nothing streaming or updating), the CPU drops from 240 to 80 MHz, and on a home Wi-Fi the Wi-Fi radio sleeps between the router's beacons, waking for each one (not while Coms is on, since boards hear each other over 2.4 GHz only while it listens). The first web request brings full speed straight back; the CPU temperature screen page shows the speed. On battery, the board also goes into deep sleep before the battery runs flat (below 3.3 V for two minutes), waking every hour to look again, or when PRG is pressed. The rest of the power goes to 900MHz Coms (its radio listens all the time), the board's own Wi-Fi (it can't nap while phones may join) and the screen.
 
 ## Folder locks
 

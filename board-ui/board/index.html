@@ -150,7 +150,7 @@ label.l{font-size:13px;color:var(--muted)}
   <div class="msg" id="sleepMsg"></div>
 
   <h2>Location</h2>
-  <p class="tip">Where the board is: the blinking cross on the screen's earth map, and the outside-temperature graph. Until you set it here, it takes the location a browser gives The Shelf's weather, which can be a rough guess.</p>
+  <p class="tip">Where the board is: the blinking cross on the screen's earth map, and the outside-temperature graph. Until you set it here, the board works it out from your internet address (good to a city or so).</p>
   <div class="card" id="locNow"><div class="empty">Loading&hellip;</div></div>
   <div class="field" style="margin-top:8px"><input id="locQ" placeholder="Town, city or ZIP code" onkeydown="if(event.key==='Enter')locFind()"><button class="pri" onclick="locFind()">Find</button></div>
   <div class="nets" id="locList" style="display:none"></div>
@@ -253,7 +253,8 @@ async function deepSleep(){const m=+$('#sleepFor').value;
   if(!confirm('Put the board into deep sleep'+(m?' for '+(m>=60?m/60+' hour'+(m>60?'s':''):m+' min'):'')+'? It stops answering until it wakes (press PRG to wake it sooner).'))return;
   try{await post('/api/board/sleep',{minutes:m});$('#sleepMsg').textContent='Going to sleep… press PRG to wake it'+(m?', or it wakes by itself.':'.')}catch(e){$('#sleepMsg').textContent=e.message;$('#sleepMsg').className='msg err'}}
 async function locLoad(){let j;try{j=await fetch('/api/board/location').then(r=>r.json())}catch(e){return}
-  $('#locNow').innerHTML=`<div class="kv"><span>Location</span><span>${j.lat==null?'Not known yet':esc(j.place||(j.lat.toFixed(2)+', '+j.lon.toFixed(2)))+(j.manual?'':' (from a browser)')}</span></div>`+(j.manual?'<div class="kv"><span></span><span><button onclick="locAuto()">Go back to the browser\'s location</button></span></div>':'')}
+  const g=j.hours?`${Math.round(j.hours/24*10)/10} days of hourly readings`+(j.minutesAgo!=null?`, updated ${j.minutesAgo} min ago`:''):(j.error||(j.online?'Getting it…':'Needs your home Wi-Fi with internet'));
+  $('#locNow').innerHTML=`<div class="kv"><span>Location</span><span>${j.lat==null?'Not known yet':esc(j.place||(j.lat.toFixed(2)+', '+j.lon.toFixed(2)))}</span></div><div class="kv"><span>Temperature graph</span><span>${esc(g)}</span></div>`+(j.manual?'<div class="kv"><span></span><span><button onclick="locAuto()">Work it out by itself again</button></span></div>':'')}
 async function locFind(){const q=$('#locQ').value.trim();const box=$('#locList');$('#locMsg').textContent='';if(!q)return;box.style.display='block';box.innerHTML='<div class="empty">Looking…</div>';
   let r,j;try{r=await fetch('/api/board/location/search?q='+encodeURIComponent(q));j=await r.json()}catch(e){box.innerHTML='';$('#locMsg').textContent='Couldn\'t reach the board.';return}
   if(!r.ok){box.innerHTML='';$('#locMsg').textContent=j.error||'That didn\'t work.';return}

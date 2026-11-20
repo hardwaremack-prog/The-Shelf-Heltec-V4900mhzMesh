@@ -208,6 +208,7 @@ void recordVisitor(const String& ip) {
 
 // ------------------------------------------------------------ outside temperature, last 4 days
 static String wxKey;                                // the weather cache's place (see weather())
+static String wxErr;                                // why there's no graph yet (settings page)
 // The board learns where it is from The Shelf's Home page (its weather asks with the browser's
 // location), keeps that, and once an hour (on a home Wi-Fi with internet) fetches the hourly
 // temperature for the past 4 days from Open-Meteo, for the screen's graph.
@@ -229,6 +230,7 @@ void wxRemember(double lat, double lon) {
   if (wxManual) return;
   if (!isnan(wxLat) && fabs(wxLat - lat) < 0.05 && fabs(wxLon - lon) < 0.05) return;
   wxLat = lat; wxLon = lon; wxp.putFloat("lat", wxLat); wxp.putFloat("lon", wxLon);
+  wxPlace = "From a browser"; wxp.putString("place", wxPlace);
   histAt = 0;                                       // somewhere new: fetch again soon
 }
 static String urlEnc(const String& v) {
@@ -277,6 +279,7 @@ bool handleLocationApi(AsyncWebServerRequest* r, const String& url, WebRequestMe
     JsonDocument b; parseBody(r, b);
     if (b["auto"] | false) {
       wxManual = false; wxPlace = ""; wxp.putBool("manual", false); wxp.remove("place");
+      wxLat = wxLon = NAN; wxp.remove("lat"); wxp.remove("lon"); histAt = 0;   // found again: browser or internet address
     } else {
       float la = b["lat"] | NAN, lo = b["lon"] | NAN;
       if (isnan(la) || isnan(lo) || la < -90 || la > 90 || lo < -180 || lo > 180) { sendErr(r, 400, "That isn't a place on the map."); return true; }
@@ -288,6 +291,8 @@ bool handleLocationApi(AsyncWebServerRequest* r, const String& url, WebRequestMe
   JsonDocument o;
   if (isnan(wxLat)) { o["lat"] = nullptr; o["lon"] = nullptr; } else { o["lat"] = wxLat; o["lon"] = wxLon; }
   o["place"] = wxPlace; o["manual"] = wxManual;
+  o["hours"] = histN; o["error"] = wxErr; o["online"] = staOK;
+  if (histAt && histN) o["minutesAgo"] = (millis() - histAt) / 60000;
   sendDoc(r, o);
   return true;
 }
@@ -300,7 +305,23 @@ int wxHistoryCopy(float* out, int max, uint32_t* startUtc) {
   portEXIT_CRITICAL(&histMux);
   return n;
 }
+// No location yet (browsers only share theirs over https, and the board is plain http): guess it
+// from the home internet connection's address. Good to a city or so; set it by hand to be exact.
+static bool ipLocate() {
+  HTTPClient http; http.setTimeout(8000);
+  if (!http.begin("http://ip-api.com/json/?fields=status,lat,lon,city,regionName") || http.GET() != 200) { http.end(); return false; }
+  JsonDocument j; DeserializationError e = deserializeJson(j, http.getStream()); http.end();
+  if (e || String(j["status"] | "") != "success" || j["lat"].isNull()) return false;
+  wxLat = j["lat"]; wxLon = j["lon"];
+  wxPlace = String(j["city"] | "") + ", " + String(j["regionName"] | "") + " (from your internet address)";
+  wxp.putFloat("lat", wxLat); wxp.putFloat("lon", wxLon); wxp.putString("place", wxPlace);
+  return true;
+}
 static void wxTask(void*) {
+  if (isnan(wxLat) && !ipLocate()) {
+    wxErr = "Couldn't work out where the board is. Set its location below.";
+    histAt = millis() - 3000000; histBusy = false; vTaskDelete(nullptr); return;
+  }
   char url[220];
   snprintf(url, sizeof url, "http://api.open-meteo.com/v1/forecast?latitude=%.3f&longitude=%.3f&hourly=temperature_2m&past_days=4&forecast_days=1&temperature_unit=fahrenheit&timeformat=unixtime", wxLat, wxLon);
   HTTPClient http; http.setTimeout(10000);
@@ -329,6 +350,7 @@ static void wxTask(void*) {
     }
   }
   http.end();
+  wxErr = ok ? "" : "Couldn't get the temperatures from Open-Meteo. Trying again in 5 minutes.";
   histAt = ok ? millis() | 1 : millis() - 3300000;                  // didn't work: try again in 5 minutes
   histBusy = false;
   vTaskDelete(nullptr);
@@ -336,7 +358,7 @@ static void wxTask(void*) {
 void wxHistoryTick() {
   if (!staOK || histBusy || time(nullptr) < 1700000000) return;
   wxOpen();
-  if (isnan(wxLat) || (histAt && millis() - histAt < 3600000)) return;
+  if (histAt && millis() - histAt < 3600000) return;
   histBusy = true;
   if (xTaskCreatePinnedToCore(wxTask, "wxhist", 8192, nullptr, 1, nullptr, 1) != pdPASS) { histBusy = false; histAt = millis() - 3300000; }
 }

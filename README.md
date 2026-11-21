@@ -19,7 +19,7 @@
 | **Messages**: finds and chats with your other Shelves (PCs, Pis, other boards), pictures included | User accounts (the board has one admin password instead) |
 | **Meshed Comms**: LoRa text mesh between boards, every board a relay, 12-hour catch-up, list of boards and remote admin | |
 | **Read-only mode** with an admin password to unlock changes | |
-| **Insane compression** (1.19): music and photos are shrunk in your browser on the way in. MP3s become Opus 48 kbps (3.8 MB → 1.4 MB, 62% smaller, tags and cover kept), photos and iPhone HEICs become AVIF at 2048 px (~3.5 MB → ~250 KB). The encoders load from the jsDelivr CDN, so the device you upload from needs the internet; otherwise files go up as they are. | |
+| **Insane compression** (1.19): music and photos are shrunk in your browser on the way in, and the **Shrink…** button on the Music and Pictures shelves shrinks what's already there (optionally removing the originals). MP3s become Opus 48 kbps (3.8 MB → 1.4 MB, 62% smaller, tags and cover kept), photos and iPhone HEICs become AVIF at 2048 px (~3.5 MB → ~250 KB). The encoders load from the jsDelivr CDN, so the device you upload from needs the internet; otherwise files go up as they are. | |
 
 The buttons for those computer-only features are hidden on the board, and the AI and Big Transfer tabs are left out.
 

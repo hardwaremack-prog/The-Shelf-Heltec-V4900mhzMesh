@@ -85,4 +85,18 @@ static int wxHistoryCopy(float* out, int max, uint32_t* startUtc) {
 }
 static bool wxLocation(float& lat, float& lon) { lat = 42.33f; lon = -83.05f; return true; }
 static const char* wxStatusText() { return "Getting them..."; }
+static bool gpsRunning() { return true; }
+static bool gpsTalking() { return true; }
+static bool gpsScreen(double& lat, double& lon, float& altM, float& kmh, int& sats, int& view) { lat = 42.33141; lon = -83.04575; altM = 183; kmh = 37.5f; sats = 9; view = 16; return true; }
+#define NEWS_MAX 6
+#define NEWS_LEN 140
+static int newsCopy(char out[][NEWS_LEN], int max, char* src, size_t srcMax) {
+  const char* h[] = {"Snow squalls expected across southeast Michigan tonight", "Detroit Lions clinch playoff spot with late field goal",
+                     "Great Lakes ice cover forming early this year", "New bridge opens to traffic after years of construction",
+                     "Scientists track unusual northern lights display", "Holiday travel expected to break records"};
+  int n = max < 6 ? max : 6;
+  for (int i = 0; i < n; i++) snprintf(out[i], NEWS_LEN, "%s", h[i]);
+  if (src) snprintf(src, srcMax, "%s", "NPR");
+  return n;
+}
 static void screenWake() {}

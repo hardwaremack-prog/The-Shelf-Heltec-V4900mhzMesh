@@ -249,8 +249,10 @@ static String urlEnc(const String& v) {
 //   GET  /api/board/location/search?q=...  places with that name (Open-Meteo's geocoding)
 //   POST /api/board/location               {lat, lon, place}  set it by hand;  {auto:true}  back to the browser's
 static void wxPush(AsyncWebServerRequest* r);
+static void newsPush(AsyncWebServerRequest* r);
 bool handleLocationApi(AsyncWebServerRequest* r, const String& url, WebRequestMethod m) {
   if (url == "/api/board/wxdata" && m == HTTP_POST) { wxPush(r); return true; }
+  if (url == "/api/board/news" && m == HTTP_POST) { newsPush(r); return true; }
   if (url != "/api/board/location" && url != "/api/board/location/search") return false;
   wxOpen();
   if (url == "/api/board/location/search") {
@@ -406,6 +408,81 @@ void wxHistoryTick() {
   if (histAt && millis() - histAt < 3600000) return;
   histBusy = true;
   if (xTaskCreatePinnedToCore(wxTask, "wxhist", 12288, nullptr, 1, nullptr, 1) != pdPASS) { histBusy = false; histAt = millis() - 3300000; }
+}
+
+// ------------------------------------------------------------ news headlines, for the screen
+// The top 6 headlines (NPR, or BBC News if NPR doesn't answer), every 30 minutes on a home Wi-Fi
+// with internet, through rss2json (the feed as JSON). A browser with The Shelf open passes them on
+// too (POST /api/board/news), the way TidyOS does.
+static char news[NEWS_MAX][NEWS_LEN]; static int newsN = 0; static char newsSrc[16] = "";
+static uint32_t newsAt = 0; static volatile bool newsBusy = false;
+static portMUX_TYPE newsMux = portMUX_INITIALIZER_UNLOCKED;
+// plain ASCII for the screen's fonts: curly quotes, dashes and the like made plain, the rest dropped
+static void plainCopy(char* out, size_t max, const char* in) {
+  size_t o = 0;
+  for (const unsigned char* p = (const unsigned char*)in; *p && o < max - 1; ) {
+    if (*p < 0x80) { out[o++] = *p++ == '\n' ? ' ' : p[-1]; continue; }
+    const char* rep = nullptr;
+    if (p[0] == 0xE2 && p[1] == 0x80) {
+      switch (p[2]) { case 0x98: case 0x99: rep = "'"; break; case 0x9C: case 0x9D: rep = "\""; break;
+                      case 0x93: case 0x94: rep = "-"; break; case 0xA6: rep = "..."; break; }
+      p += 3;
+    } else if (p[0] == 0xC2 && p[1] == 0xA0) { rep = " "; p += 2; }
+    else { p++; while ((*p & 0xC0) == 0x80) p++; }
+    for (const char* r = rep; r && *r && o < max - 1; r++) out[o++] = *r;
+  }
+  out[o] = 0;
+  // &amp; and friends
+  String t = out; t.replace("&amp;", "&"); t.replace("&#39;", "'"); t.replace("&quot;", "\""); t.trim();
+  snprintf(out, max, "%s", t.c_str());
+}
+static void newsTask(void*) {
+  static const char* const FEEDS[][2] = {{"https://feeds.npr.org/1001/rss.xml", "NPR"}, {"https://feeds.bbci.co.uk/news/rss.xml", "BBC News"}};
+  bool ok = false;
+  for (auto& fd : FEEDS) {
+    JsonDocument f; f["status"] = true; f["items"][0]["title"] = true;
+    JsonDocument j(&psAlloc);
+    if (!getJson(String("https://api.rss2json.com/v1/api.json?rss_url=") + urlEnc(fd[0]), j, f)) continue;
+    JsonArray it = j["items"];
+    if (String(j["status"] | "") != "ok" || it.size() == 0) continue;
+    char tmp[NEWS_MAX][NEWS_LEN]; int n = 0;
+    for (JsonVariant v : it) { if (n == NEWS_MAX) break; plainCopy(tmp[n], NEWS_LEN, v["title"] | ""); if (tmp[n][0]) n++; }
+    if (!n) continue;
+    portENTER_CRITICAL(&newsMux);
+    memcpy(news, tmp, sizeof tmp); newsN = n; snprintf(newsSrc, sizeof newsSrc, "%s", fd[1]);
+    portEXIT_CRITICAL(&newsMux);
+    ok = true; break;
+  }
+  newsAt = ok ? millis() | 1 : millis() - 1500000;                 // didn't work: again in 5 minutes
+  newsBusy = false;
+  vTaskDelete(nullptr);
+}
+void newsTick() {
+  if (!staOK || newsBusy || histBusy || (newsAt && millis() - newsAt < 1800000)) return;   // (one secure fetch at a time)
+  newsBusy = true;
+  if (xTaskCreatePinnedToCore(newsTask, "news", 12288, nullptr, 1, nullptr, 1) != pdPASS) { newsBusy = false; newsAt = millis() - 1500000; }
+}
+int newsCopy(char out[][NEWS_LEN], int max, char* src, size_t srcMax) {
+  portENTER_CRITICAL(&newsMux);
+  int n = std::min(newsN, max);
+  memcpy(out, news, n * NEWS_LEN);
+  if (src) snprintf(src, srcMax, "%s", newsSrc);
+  portEXIT_CRITICAL(&newsMux);
+  return n;
+}
+// a browser passing on what it fetched: {titles:[...], source}
+static void newsPush(AsyncWebServerRequest* r) {
+  JsonDocument b(&psAlloc);
+  if (!parseBody(r, b) || !b["titles"].is<JsonArray>()) return sendErr(r, 400, "Invalid request");
+  char tmp[NEWS_MAX][NEWS_LEN]; int n = 0;
+  for (JsonVariant v : b["titles"].as<JsonArray>()) { if (n == NEWS_MAX) break; plainCopy(tmp[n], NEWS_LEN, v | ""); if (tmp[n][0]) n++; }
+  if (n) {
+    portENTER_CRITICAL(&newsMux);
+    memcpy(news, tmp, sizeof tmp); newsN = n; snprintf(newsSrc, sizeof newsSrc, "%s", (const char*)(b["source"] | "News"));
+    portEXIT_CRITICAL(&newsMux);
+    newsAt = millis() | 1;
+  }
+  sendJson(r, 200, "{\"ok\":true}");
 }
 
 // ------------------------------------------------------------ Weather (Open-Meteo, cached 10 minutes)

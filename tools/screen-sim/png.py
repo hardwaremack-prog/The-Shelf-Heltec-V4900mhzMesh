@@ -5,10 +5,10 @@ from PIL import Image, ImageDraw, ImageFont
 src, out = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2]); out.mkdir(parents=True, exist_ok=True)
 S = 4                                    # pixels per screen pixel
 BLUE, YELLOW, OFF, BEZEL = (90, 200, 255), (255, 214, 60), (8, 12, 22), (24, 26, 30)
-order = ["status", "now-playing", "game", "picture", "watch", "clock", "earth", "outside", "affirmation", "color", "temperature"]
+order = ["status", "now-playing", "game", "picture", "watch", "clock", "earth", "outside", "news", "gps", "affirmation", "color", "temperature"]
 titles = {"status": "Status", "now-playing": "Now playing", "game": "A game opened", "picture": "A picture on show",
           "watch": "Watch face", "clock": "Clock", "affirmation": "Today's affirmation", "color": "Color of the day",
-          "temperature": "CPU temperature", "earth": "Sunlit earth", "outside": "Outside, last 4 days"}
+          "temperature": "CPU temperature", "earth": "Sunlit earth", "outside": "Outside, last 4 days", "news": "News headlines", "gps": "GPS (V4 with the GPS kit)"}
 tiles = []
 for n in order:
     rows = (src / f"{n}.txt").read_text().split()

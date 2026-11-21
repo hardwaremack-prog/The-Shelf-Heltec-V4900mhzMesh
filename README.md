@@ -201,6 +201,7 @@ While it's on, the screen takes turns through these pages, about 6 to 10 seconds
 - **Watch face** with a sweeping second hand and the date, and a big **clock**. These need the time: from the internet, or from the first browser that opens The Shelf, which also tells the board its time zone.
 - **Sunlit earth:** the world map with day and night as they are right now (land in daylight solid, twilight half-lit, night dim, the day/night line dotted across the oceans), the sun (a dot with rays) over the spot where it's straight overhead, and a flashing ring where the board is.
 - **Outside, last 4 days:** the hourly outside temperature with a dashed freezing line (32 °F), each day's name, and the low and high. The board works out where it is from your internet address (or set it on its settings page, under Location) and fetches the hours from Open-Meteo once an hour, so this page needs a home Wi-Fi with internet. The settings page shows how many hours it has.
+- **News:** the top 6 headlines (NPR, or BBC News if NPR doesn't answer), one after another, each scrolling by once. Fetched every 30 minutes on a home Wi-Fi with internet (and passed on by any browser with The Shelf open).
 - **Today's affirmation** and the **color of the day**: the same ones The Shelf's Home page shows that day.
 - **CPU temperature** in °C and °F, how long the board has been on, and free memory.
 

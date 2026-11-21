@@ -9,7 +9,7 @@
 #include "daily_gen.h"
 #include "world_map.h"
 
-enum { P_STATUS, P_WATCH, P_NOW, P_EARTH, P_GPS, P_AFFIRM, P_CLOCK, P_WXGRAPH, P_COLOR, P_TEMP, P_COUNT };
+enum { P_STATUS, P_WATCH, P_NOW, P_EARTH, P_GPS, P_NEWS, P_AFFIRM, P_CLOCK, P_WXGRAPH, P_COLOR, P_TEMP, P_COUNT };
 static int page = P_STATUS;
 static uint32_t pageAt = 0, pageLen = 10000;
 static volatile bool nextPageNow = false;
@@ -393,6 +393,30 @@ static void drawGpsPage() {
   for (int i = 0; i < sats && i < 24; i++) oled.drawDisc(4 + i * 5, 42, 1);
 }
 
+// The top 6 news headlines, one after another, each scrolling by once.
+static char nh[NEWS_MAX][NEWS_LEN]; static int nhN = 0; static char nhSrc[16];
+static uint32_t headlineMs(const char* t) { oled.setFont(u8g2_font_helvB12_tf); return max<uint32_t>(4500, passMs(oled.getStrWidth(t))); }
+static uint32_t newsDuration() {
+  nhN = newsCopy(nh, NEWS_MAX, nhSrc, sizeof nhSrc);              // (a snapshot for the whole page)
+  uint32_t t = 0; for (int i = 0; i < nhN; i++) t += headlineMs(nh[i]);
+  return t ? t : 6000;
+}
+static void drawNewsPage(uint32_t el) {
+  if (!nhN) nhN = newsCopy(nh, NEWS_MAX, nhSrc, sizeof nhSrc);
+  if (!nhN) return;
+  int i = 0; uint32_t start = 0;
+  while (i < nhN - 1 && el - start >= headlineMs(nh[i])) { start += headlineMs(nh[i]); i++; }
+  char b[32]; snprintf(b, sizeof b, "NEWS \xB7 %d OF %d", i + 1, nhN);
+  header(b);
+  oled.setFont(u8g2_font_helvB12_tf);
+  drawPass(36, nh[i], el - start);
+  scrolling = true;
+  // where it's from, and dots for the headlines, in the bottom strip
+  oled.setFont(u8g2_font_5x7_tf);
+  oled.drawStr(0, 62, nhSrc);
+  for (int k = 0; k < nhN; k++) { int x = 128 - (nhN - k) * 8 + 3; if (k == i) oled.drawDisc(x, 58, 2); else oled.drawCircle(x, 58, 2); }
+}
+
 // ---- the carousel
 static bool pageReady(int p) {
   switch (p) {
@@ -400,6 +424,7 @@ static bool pageReady(int p) {
     case P_WATCH: case P_CLOCK: case P_AFFIRM: case P_COLOR: case P_EARTH: return clockOK();
     case P_WXGRAPH: return clockOK();
     case P_GPS: return gpsRunning();
+    case P_NEWS: { static char t[1][NEWS_LEN]; return newsCopy(t, 1, nullptr, 0) > 0; }
     default: return true;
   }
 }
@@ -411,6 +436,7 @@ static uint32_t pageDuration(int p) {
     case P_TEMP: return 6000;
     case P_EARTH: return 9000;
     case P_GPS: return 9000;
+    case P_NEWS: return newsDuration();
     case P_WXGRAPH: return 9000;
     case P_NOW: return 10000;
     case P_AFFIRM: oled.setFont(u8g2_font_helvB12_tf); return max<uint32_t>(7000, passMs(oled.getUTF8Width(todaysAffirmation())));
@@ -444,6 +470,7 @@ static void drawScreen() {
     case P_TEMP: drawTempPage(); break;
     case P_EARTH: drawEarthPage(); break;
     case P_GPS: drawGpsPage(); break;
+    case P_NEWS: drawNewsPage(el); break;
     case P_WXGRAPH: drawWxGraphPage(); break;
     default: drawStatusPage(); break;
   }

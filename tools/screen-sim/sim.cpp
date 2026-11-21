@@ -5,6 +5,7 @@
 #include <cstring>
 #include <cstdint>
 #include <cmath>
+using std::isnan;
 #include <string>
 #include <algorithm>
 #include <sys/time.h>
@@ -31,6 +32,8 @@ static void shot(int p, uint32_t el, const char* name) {
     case P_TEMP: drawTempPage(); break;
     case P_EARTH: drawEarthPage(); break;
     case P_WXGRAPH: drawWxGraphPage(); break;
+    case P_GPS: drawGpsPage(); break;
+    case P_NEWS: drawNewsPage(el); break;
     default: drawStatusPage(); break;
   }
   dump(name);
@@ -47,6 +50,8 @@ int main() {
   shot(P_COLOR, 0, "color.txt");
   fakeMillis = 500; shot(P_EARTH, 0, "earth.txt");
   shot(P_WXGRAPH, 0, "outside.txt");
+  shot(P_GPS, 0, "gps.txt");
+  shot(P_NEWS, 0, "news.txt");
   fakeMillis = (2 * 24 * 60 + 3 * 60 + 12) * 60000u;   // up 2 days, 3 hours
   shot(P_TEMP, 0, "temperature.txt");
   return 0;

@@ -217,7 +217,12 @@ void wxRemember(double lat, double lon);
 bool wxLocation(float& lat, float& lon);
 int wxHistoryCopy(float* out, int max, uint32_t* startUtc);   // hourly °F, oldest first
 void wxHistoryTick();
-void wxFromGps(double lat, double lon);                 // the GPS knows exactly where the board is
+void wxFromGps(double lat, double lon);
+// the top news headlines, for the screen
+#define NEWS_MAX 6
+#define NEWS_LEN 140
+void newsTick();
+int newsCopy(char out[][NEWS_LEN], int max, char* src, size_t srcMax);                 // the GPS knows exactly where the board is
 // gps.cpp: Heltec's GPS kit on the V4's GNSS connector
 extern bool sdOnAlt;                                    // the card is on CS 4 / MISO 6 / CLK 47 / MOSI 48
 void gpsBegin(); void gpsTick(); void gpsSleep();

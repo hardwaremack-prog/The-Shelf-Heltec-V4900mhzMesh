@@ -925,6 +925,7 @@ void loop() {
   powerTick(now);
   gpsTick();
   wxHistoryTick();
+  newsTick();
   lowBatteryTick(now);
   if (rebootAt && now > rebootAt) { oledMsg("Restarting..."); delay(200); ESP.restart(); }
 

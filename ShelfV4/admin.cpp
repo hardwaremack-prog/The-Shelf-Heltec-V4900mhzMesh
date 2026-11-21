@@ -117,7 +117,7 @@ bool allowedWhenReadOnly(const String& url, WebRequestMethod m) {
   if (url == "/api/coms/send" || url.startsWith("/api/coms/remote/")) return true;
   if (url == "/api/board/time" || url == "/api/board/showing") return true;   // the clock, the screen
   if (url == "/api/locks/unlock" || url == "/api/locks/relock") return true;  // folder locks' viewing password
-  if (url == "/api/board/wxdata") return true;                                 // a browser passing on the weather
+  if (url == "/api/board/wxdata" || url == "/api/board/news") return true;                                 // a browser passing on the weather
   if (url.startsWith("/api/bt/") && url != "/api/bt/power" && url != "/api/bt/forget") return true;   // playing to a headset
   if (url.startsWith("/api/files/") && (url.endsWith("/play") || url.endsWith("/thumbnail"))) return true;   // play counts, auto thumbnails
   return false;

@@ -1001,3 +1001,23 @@
     timer = setInterval(refresh, 2000);
   };
 })();
+
+// ---- News headlines for the board's screen ----
+// The browser fetches the top headlines (NPR, or BBC News) as TidyOS does and hands them to the
+// board, which also fetches them itself every 30 minutes when it has internet.
+(function () {
+  const FEEDS = [['https://feeds.npr.org/1001/rss.xml', 'NPR'], ['https://feeds.bbci.co.uk/news/rss.xml', 'BBC News']];
+  async function tick() {
+    for (const [u, name] of FEEDS) {
+      try {
+        const j = await fetch('https://api.rss2json.com/v1/api.json?rss_url=' + encodeURIComponent(u), { cache: 'no-store' }).then(r => r.json());
+        if (j.status !== 'ok' || !j.items || !j.items.length) continue;
+        const titles = j.items.slice(0, 6).map(x => String(x.title || '').trim()).filter(Boolean);
+        await fetch('/api/board/news', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ titles, source: name }) });
+        return;
+      } catch (e) {}
+    }
+  }
+  setTimeout(tick, 8000);
+  setInterval(tick, 30 * 60000);
+})();

@@ -44,8 +44,8 @@ String extOf(const String& n) {
 }
 
 static bool inList(const String& e, const char* const* list) { for (; *list; list++) if (e == *list) return true; return false; }
-static const char* const PIC[] = {"jpg","jpeg","png","gif","webp","bmp","svg","heic",nullptr};
-static const char* const MUS[] = {"mp3","wav","ogg","flac","m4a","aac","mid","midi","kar","rmi",nullptr};
+static const char* const PIC[] = {"jpg","jpeg","png","gif","webp","bmp","svg","heic","heif","avif",nullptr};
+static const char* const MUS[] = {"mp3","wav","ogg","opus","flac","m4a","aac","mid","midi","kar","rmi",nullptr};
 static const char* const VID[] = {"mp4","webm","mov","avi","mkv","m4v","ogv","3gp",nullptr};
 String fileKind(const String& name) {
   String e = extOf(name);
@@ -176,7 +176,7 @@ const char* mimeFor(const String& p) {
     {"csv","text/csv"},{"xml","application/xml"},{"svg","image/svg+xml"},{"png","image/png"},{"jpg","image/jpeg"},
     {"jpeg","image/jpeg"},{"gif","image/gif"},{"webp","image/webp"},{"bmp","image/bmp"},{"ico","image/x-icon"},
     {"heic","image/heic"},{"avif","image/avif"},{"mp3","audio/mpeg"},{"mid","audio/midi"},{"midi","audio/midi"},{"kar","audio/midi"},{"rmi","audio/midi"},{"m4a","audio/mp4"},{"aac","audio/aac"},
-    {"wav","audio/wav"},{"ogg","audio/ogg"},{"flac","audio/flac"},{"mp4","video/mp4"},{"m4v","video/mp4"},
+    {"wav","audio/wav"},{"ogg","audio/ogg"},{"opus","audio/ogg"},{"heif","image/heif"},{"flac","audio/flac"},{"mp4","video/mp4"},{"m4v","video/mp4"},
     {"webm","video/webm"},{"mov","video/quicktime"},{"ogv","video/ogg"},{"mkv","video/x-matroska"},{"avi","video/x-msvideo"},
     {"3gp","video/3gpp"},{"pdf","application/pdf"},{"zip","application/zip"},{"wasm","application/wasm"},
     {"woff","font/woff"},{"woff2","font/woff2"},{"ttf","font/ttf"},{"otf","font/otf"},{"data","application/octet-stream"},

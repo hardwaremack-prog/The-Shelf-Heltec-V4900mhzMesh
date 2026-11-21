@@ -12,13 +12,14 @@
 
 | ✅ Included | 💻 Needs The Shelf on a computer |
 |---|---|
-| Pictures (grid, slideshow, photo editor), Music (shuffle, play counts, artist and cover art read from your MP3s' own tags), **MIDI** (its own shelf: `.mid`, `.midi`, `.kar` files played by a built-in General MIDI synth, with the same player, shuffle and play counts), Videos, Games (`.html` and zipped HTML games play in the page), Programs, Books (PDF reader and cover thumbnails) | The AI assistant and Create with AI |
+| Pictures (grid, slideshow, photo editor), Music (shuffle, play counts, artist and cover art read from your MP3s' and Opus files' own tags), **MIDI** (its own shelf: `.mid`, `.midi`, `.kar` files played by a built-in General MIDI synth, with the same player, shuffle and play counts), Videos, Games (`.html` and zipped HTML games play in the page), Programs, Books (PDF reader and cover thumbnails) | The AI assistant and Create with AI |
 | Home: bulletin board with notes, pasted pictures and videos, quick links, weather | Remote desktop (VNC) |
 | Notes, Docs, Sheets, Slides, Draw | Online album-art lookup, tag editing, Standardize names, Remove duplicates, Export |
 | Tidy Suite | Big Transfer, backup/restore zips, spreadsheet import |
 | **Messages**: finds and chats with your other Shelves (PCs, Pis, other boards), pictures included | User accounts (the board has one admin password instead) |
 | **Meshed Comms**: LoRa text mesh between boards, every board a relay, 12-hour catch-up, list of boards and remote admin | |
 | **Read-only mode** with an admin password to unlock changes | |
+| **Insane compression** (1.19): music and photos are shrunk in your browser on the way in. MP3s become Opus 48 kbps (3.8 MB → 1.4 MB, 62% smaller, tags and cover kept), photos and iPhone HEICs become AVIF at 2048 px (~3.5 MB → ~250 KB). The encoders load from the jsDelivr CDN, so the device you upload from needs the internet; otherwise files go up as they are. | |
 
 The buttons for those computer-only features are hidden on the board, and the AI and Big Transfer tabs are left out.
 

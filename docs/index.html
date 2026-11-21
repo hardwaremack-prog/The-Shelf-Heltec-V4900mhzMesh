@@ -141,6 +141,10 @@ ul.ok{padding-left:20px;margin:0}ul.ok li{margin-bottom:6px}
     <li>Back on your home Wi-Fi, open the address on the board's screen, or <code>http://shelf-v4-xxxx.local</code> (<code>shelf-v3-xxxx.local</code> on a V3, <code>shelf-esp32-xxxx.local</code> on a plain ESP32).</li>
   </ol>
 
+  <h2 id="shrink">Make room: insane compression for your music and photos</h2>
+  <p>Upload music and photos through the board's page and they're shrunk in your browser on the way in: songs become <b>Opus</b>, which sounds about the same as an MP3 at about a third of the size and keeps its title, artist and album art. Photos become <b>AVIF</b>, and iPhone HEIC photos work too. The board stores only the small copy, so your microSD card holds about 3 times the music and over 10 times the photos, and everything streams faster over Wi-Fi. (Untick <i>Shrink music and photos first</i> in the upload box to send files as they are.)</p>
+  <div id="shrinkPromo" data-where="in the Music and Pictures folders on the microSD card, or upload them through the board's page"></div>
+
   <h2>Take it anywhere</h2>
   <p>On the board's settings page, choose <b>Use its own Wi-Fi</b> and it makes its own network, so The Shelf works in the car, at camp, or anywhere without Wi-Fi. Join it and open <code>http://10.1.1.250</code>. Your phone shows "No Internet Connection" and keeps using cellular data for texts and apps while it stays connected to The Shelf. The screen shows the network name, the password, the IP, and a battery meter, so you can run it from a LiPo.</p>
 
@@ -304,5 +308,9 @@ function confirmRestore(name, n) {
   return window.confirm(`Restore ${name} (${mb(n)})?\n\nThis replaces everything on the board's flash: firmware, Wi-Fi, admin password and on-board files. The microSD card isn't touched.`);
 }
 </script>
+<script src="shrink/shrink.js"></script>
+<script src="shrink/photo.js"></script>
+<script src="shrink/zip.js"></script>
+<script src="shrink/promo.js"></script>
 </body>
 </html>

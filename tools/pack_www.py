@@ -21,7 +21,7 @@ if not (public / "app.js").exists():
 
 stage = ROOT / "build" / "www"
 shutil.rmtree(stage, ignore_errors=True)
-SKIP_DIRS = {"vendor/novnc"}
+SKIP_DIRS = {"vendor/novnc", "vendor/shrink"}   # (vendor/shrink: the computer Shelf's offline copy of the shrinkers; boards load them from the CDN)
 SKIP_FILES = {"vnc.html"}
 for src in public.rglob("*"):
     rel = src.relative_to(public).as_posix()
@@ -135,6 +135,18 @@ if board != "V4":
             t = t.replace("const NOLORA = false;", "const NOLORA = true; ")
         f.write_text(t, encoding="utf-8")
 
+# A plain ESP32's web partition is 1.2 MB: PDF.js (~400 KB) doesn't fit beside the rest, so it loads from the CDN there
+# (Books covers and reading then need the internet; the rest of the page works offline as before).
+if board == "ESP32":
+    shutil.rmtree(stage / "vendor" / "pdfjs", ignore_errors=True)
+    ix = stage / "index.html"
+    t = ix.read_text(encoding="utf-8")
+    cdn = "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/"
+    n = t.count("vendor/pdfjs/")
+    t = t.replace("vendor/pdfjs/", cdn)
+    if n < 2: sys.exit("pack_www: index.html's PDF.js lines changed -- update the ESP32 CDN switch")
+    ix.write_text(t, encoding="utf-8")
+
 try:
     rev = subprocess.run(["git", "-C", str(shelf), "rev-parse", "--short", "HEAD"], capture_output=True, text=True).stdout.strip()
 except Exception:
@@ -165,5 +177,7 @@ if total > size * 0.9:
 # Needs mklittlefs 3.x built with LFS_NAME_MAX=64 to match the board (the copy bundled with
 # the esp32 2.0.x core is too old for paths over 32 characters). See README.
 mk = os.environ.get("MKLITTLEFS") or shutil.which("mklittlefs") or "mklittlefs"
-subprocess.run([mk, "-c", str(stage), "-b", "4096", "-p", "256", "-s", str(size), str(out_bin)], check=True, stdout=subprocess.DEVNULL)
+r = subprocess.run([mk, "-c", str(stage), "-b", "4096", "-p", "256", "-s", str(size), str(out_bin)], check=True, capture_output=True, text=True)
+if "Error" in (r.stdout + r.stderr):   # (it still writes an image, with the file that didn't fit left empty)
+    sys.exit("mklittlefs couldn't fit everything in the web partition:\n" + (r.stdout + r.stderr)[-600:])
 print(f"wrote {out_bin}")

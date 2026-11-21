@@ -102,6 +102,116 @@ static bool readId3(const String& path, String& artist, String& title, const Str
   return true;
 }
 
+// ---- Opus / Ogg Vorbis: the comment packet (TITLE=, ARTIST=, and the cover as METADATA_BLOCK_PICTURE, base64).
+// Read straight from the Ogg pages a byte at a time, so even a big cover needs no more RAM than a small buffer.
+// (Songs shrunk by The Shelf's upload page are .opus files made this way.)
+namespace {
+struct OggIn {
+  File& f; uint8_t lace[255]; int nseg = 0, si = 0, left = 0; bool endAfter = false;
+  explicit OggIn(File& file) : f(file) {}
+  bool page() {
+    uint8_t h[27];
+    if (f.read(h, 27) != 27 || memcmp(h, "OggS", 4) != 0) return false;
+    nseg = h[26]; si = 0;
+    return f.read(lace, nseg) == nseg;
+  }
+  int get() {                      // next byte of the current packet; -1 at its end, -2 at the end of the file
+    while (left == 0) {
+      if (endAfter) { endAfter = false; return -1; }
+      if (si >= nseg) { if (!page()) return -2; continue; }
+      left = lace[si++]; endAfter = left < 255;
+    }
+    left--; return f.read();
+  }
+  bool skipPacket() { int c; while ((c = get()) >= 0) {} return c == -1; }
+  bool u32le(uint32_t& v) { v = 0; for (int i = 0; i < 4; i++) { int c = get(); if (c < 0) return false; v |= (uint32_t)c << (8 * i); } return true; }
+  bool skip(uint32_t n) { while (n--) if (get() < 0) return false; return true; }
+};
+int b64val(int c) {
+  if (c >= 'A' && c <= 'Z') return c - 'A'; if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+  if (c >= '0' && c <= '9') return c - '0' + 52; if (c == '+') return 62; if (c == '/') return 63; return -1;
+}
+}
+
+static bool readOggTags(const String& path, String& artist, String& title, const String& artOut) {
+  File f = store->open(path, FILE_READ);
+  if (!f) return false;
+  OggIn o(f);
+  bool ok = false;
+  do {
+    if (!o.skipPacket()) break;                                  // OpusHead / Vorbis identification header
+    int c = o.get();
+    if (c == 'O') { char m[7]; for (auto& x : m) x = o.get(); if (memcmp(m, "pusTags", 7)) break; }
+    else if (c == 3) { char m[6]; for (auto& x : m) x = o.get(); if (memcmp(m, "vorbis", 6)) break; }
+    else break;
+    uint32_t vl, n;
+    if (!o.u32le(vl) || vl > 4096 || !o.skip(vl) || !o.u32le(n)) break;
+    ok = true;
+    bool gotArt = false;
+    for (uint32_t i = 0; i < n && i < 200; i++) {
+      uint32_t len;
+      if (!o.u32le(len)) break;
+      char key[24]; uint32_t k = 0; int ch = 0;
+      while (k < len && k < sizeof key - 1) { ch = o.get(); if (ch < 0) break; k++; if (ch == '=') break; key[k - 1] = toupper(ch); }
+      if (ch < 0) break;
+      key[ch == '=' ? k - 1 : k] = 0;
+      uint32_t rest = len - k;
+      if (ch == '=' && (!strcmp(key, "ARTIST") || !strcmp(key, "TITLE")) && rest < 512) {
+        String v; for (uint32_t j = 0; j < rest; j++) { int b = o.get(); if (b < 0) break; v += (char)b; }
+        v.trim();
+        if (key[0] == 'A' && !artist.length()) artist = v;
+        if (key[0] == 'T' && !title.length()) title = v;
+      } else if (ch == '=' && !strcmp(key, "METADATA_BLOCK_PICTURE") && !gotArt && artOut.length()) {
+        // base64 of a FLAC picture block: type, mime, description, w/h/depth/colours, then the picture itself
+        File out; uint32_t pos = 0, need = 32, mimeL = 0, descL = 0, dataL = 0, wrote = 0; uint8_t hdr[8]; int stage = 0;
+        uint32_t acc = 0; int bits = 0; uint8_t wb[512]; size_t wn = 0; bool bad = false;
+        for (uint32_t j = 0; j < rest; j++) {
+          int b = o.get(); if (b < 0) { bad = true; break; }
+          int v = b64val(b); if (v < 0) continue;
+          acc = (acc << 6) | v; bits += 6;
+          if (bits < 8) continue;
+          bits -= 8; uint8_t byte = (acc >> bits) & 0xFF;
+          // stage 0: type(4) mimeLen(4); 1: mime; 2: descLen(4); 3: desc; 4: 16 bytes + dataLen(4); 5: data
+          if (stage == 5) {
+            if (wrote < dataL) { wb[wn++] = byte; wrote++; if (wn == sizeof wb) { if (out.write(wb, wn) != wn) { bad = true; break; } wn = 0; } }
+            continue;
+          }
+          if (stage == 0) { hdr[pos++] = byte; if (pos == 8) { mimeL = (hdr[4] << 24) | (hdr[5] << 16) | (hdr[6] << 8) | hdr[7]; pos = 0; stage = mimeL ? 1 : 2; if (mimeL > 256) { bad = true; break; } } }
+          else if (stage == 1) { if (++pos == mimeL) { pos = 0; stage = 2; } }
+          else if (stage == 2) { hdr[pos++] = byte; if (pos == 4) { descL = (hdr[0] << 24) | (hdr[1] << 16) | (hdr[2] << 8) | hdr[3]; pos = 0; stage = descL ? 3 : 4; if (descL > 4096) { bad = true; break; } } }
+          else if (stage == 3) { if (++pos == descL) { pos = 0; stage = 4; } }
+          else if (stage == 4) {
+            if (pos >= 16) hdr[pos - 16] = byte;
+            if (++pos == 20) {
+              dataL = (hdr[0] << 24) | (hdr[1] << 16) | (hdr[2] << 8) | hdr[3];
+              if (!dataL || dataL > 3u * 1024 * 1024) { bad = true; break; }
+              out = store->open(artOut, FILE_WRITE); if (!out) { bad = true; break; }
+              stage = 5;
+            }
+          }
+        }
+        (void)need;
+        if (out) {
+          if (!bad && wn && out.write(wb, wn) != wn) bad = true;
+          out.close();
+          if (!bad && wrote == dataL) gotArt = true; else store->remove(artOut);
+        }
+        if (bad) break;
+      } else if (!o.skip(rest)) break;
+    }
+  } while (false);
+  f.close();
+  return ok;
+}
+
+// MP3: ID3v2; Opus / Ogg: the comment packet
+static bool hasTagReader(const String& name) { String e = extOf(name); return e == "mp3" || e == "opus" || e == "ogg"; }
+static bool readTags(const String& path, String& artist, String& title, const String& artOut) {
+  String e = extOf(path);
+  if (e == "opus" || e == "ogg") return readOggTags(path, artist, title, artOut);
+  return readId3(path, artist, title, artOut);
+}
+
 static void musicMetaRun();
 void musicMetaLoop() {
   if (!dirty || millis() - dirtyAt < 4000) return;
@@ -122,11 +232,11 @@ static void artOnlyScan() {
     if (dirty) return false;                                     // new uploads: start over later
     if (musicReaders > 0 || streamsActive > 0 || ESP.getMaxAllocHeap() < 16 * 1024) { dirty = true; dirtyAt = millis() + 26000; return false; }
     String n = name;
-    if (dir || extOf(n) != "mp3") return true;
+    if (dir || !hasTagReader(n)) return true;
     String hex = fnvHex(String("Music/") + n);
     if (hasHash(have, hex)) return true;
     String artist, title;
-    readId3("/Music/" + n, artist, title, String(DATA_ROOT "/album-art/") + hex + ".jpg");
+    readTags("/Music/" + n, artist, title, String(DATA_ROOT "/album-art/") + hex + ".jpg");
     delay(2);
     return true;
   });
@@ -164,7 +274,7 @@ static void musicMetaRun() {
     if (!e.isNull() && (e["s"] | 0u) == f.second) continue;
     String artist, title;
     String art = String(DATA_ROOT "/album-art/") + fnvHex(String("Music/") + f.first) + ".jpg";
-    if (extOf(f.first) == "mp3") readId3("/Music/" + f.first, artist, title, hasName(haveArt, art.substring(art.lastIndexOf('/') + 1)) ? String("") : art);
+    if (hasTagReader(f.first)) readTags("/Music/" + f.first, artist, title, hasName(haveArt, art.substring(art.lastIndexOf('/') + 1)) ? String("") : art);
     JsonObject o = meta[f.first].to<JsonObject>();
     o["s"] = f.second;
     if (artist.length()) o["a"] = artist;

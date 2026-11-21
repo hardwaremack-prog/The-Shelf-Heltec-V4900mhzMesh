@@ -49,6 +49,10 @@ a{color:var(--accent)}
     <a class="btn" href="https://github.com/hardwaremack-prog/the-shelf/archive/refs/heads/main.zip">Download The Shelf (.zip)</a>
   </div>
 
+  <h2 id="shrink">Make room: insane compression for your music and photos</h2>
+  <p>When you upload music or photos, The Shelf shrinks them in your browser first: songs become <b>Opus</b> (about 60% smaller, album art kept) and photos become <b>AVIF</b> (often over 90% smaller, iPhone HEIC included). It works offline, too. Here's the before and after.</p>
+  <div id="shrinkPromo" data-where="on your Shelf"></div>
+
   <h2>After it's installed</h2>
   <ol>
     <li>The Shelf opens at <b>http://localhost:8080</b>. Other phones and computers on your Wi-Fi use the address shown at the bottom of its sidebar.</li>
@@ -65,4 +69,8 @@ document.querySelectorAll('[data-copy]').forEach(b => b.addEventListener('click'
   setTimeout(() => { b.textContent = 'Copy'; }, 2000);
 }));
 </script>
+<script src="shrink/shrink.js"></script>
+<script src="shrink/photo.js"></script>
+<script src="shrink/zip.js"></script>
+<script src="shrink/promo.js"></script>
 </body></html>

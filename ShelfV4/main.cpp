@@ -512,6 +512,10 @@ static void onJoined() {
   Serial.printf("[shelf] joined \"%s\" as %s\n", wifiSSID.c_str(), WiFi.localIP().toString().c_str());
   WiFi.setSleep(false); wifiNap = false;            // power saving looks again on the next loop
   startMDNS();
+  {                                                 // remember its address at home: the settings page links to it
+    String ip = WiFi.localIP().toString();          // after switching from its own Wi-Fi back to the home one
+    if (prefs.getString("homeip", "") != ip) prefs.putString("homeip", ip);
+  }
   if (!ntpStarted) { configTime(0, 0, "pool.ntp.org", "time.google.com"); ntpStarted = true; }
 }
 static String sanitizeHost(String h) {
@@ -535,7 +539,7 @@ bool handleBoardApi(AsyncWebServerRequest* r, const String& url, WebRequestMetho
       "\",\"total\":" + String((double)storeTotal, 0) + ",\"used\":" + String((double)storeUsed, 0) + ",\"host\":\"" + hostName +
       "\",\"ip\":\"" + currentIP() + "\",\"ssid\":\"" + jsonEsc(staOK ? WiFi.SSID() : String("")) + "\",\"rssi\":" + (staOK ? WiFi.RSSI() : 0) +
       ",\"ap\":" + (apActive ? "true" : "false") + ",\"apName\":\"" + jsonEsc(ownSSID) + "\",\"hotspot\":" + (hotspotMode ? "true" : "false") +
-      ",\"setup\":" + (firstSetup ? "true" : "false") + ",\"homeSsid\":\"" + jsonEsc(wifiSSID) + "\",\"apOpen\":" + (ownPass.length() >= 8 ? "false" : "true") + ",\"apPass\":\"" + jsonEsc(ownPass) + "\"" +
+      ",\"setup\":" + (firstSetup ? "true" : "false") + ",\"homeSsid\":\"" + jsonEsc(wifiSSID) + "\",\"homeIp\":\"" + prefs.getString("homeip", "") + "\",\"apOpen\":" + (ownPass.length() >= 8 ? "false" : "true") + ",\"apPass\":\"" + jsonEsc(ownPass) + "\"" +
       ",\"clients\":" + (apActive ? WiFi.softAPgetStationNum() : 0) + ",\"timeSet\":" + (time(nullptr) > 1700000000 ? "true" : "false") + ",\"tz\":" + tzMin + ",\"scrSleep\":" + (scrAutoSleep ? "true" : "false") + ",\"pwrSave\":" + (pwrSave ? "true" : "false") + ",\"cpuMhz\":" + getCpuFrequencyMhz() + ",\"temp\":" + String(temperatureRead(), 1) +
       ",\"uptime\":" + (millis() / 1000) +
       ",\"sdPins\":\"" + String(sdOnAlt ? "CS 4, MISO 6, CLK 47, MOSI 48" : SD_PINS) + "\",\"gps\":" + (gpsAvailable() ? "true" : "false") + ",\"sdRetries\":" + String(sdRetries) + ",\"sdFailures\":" + String(sdFailures) + ",\"heap\":" + ESP.getFreeHeap() + ",\"psram\":" + ESP.getPsramSize() + "}";

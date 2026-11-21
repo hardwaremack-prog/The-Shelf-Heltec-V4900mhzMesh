@@ -47,6 +47,8 @@ label.l{font-size:13px;color:var(--muted)}
 .bar{height:8px;background:var(--ink-deep);border:1px solid var(--divider);border-radius:99px;overflow:hidden;margin-top:10px;display:none}
 .bar>div{height:100%;width:0;background:var(--accent);transition:width .3s}
 .chk{display:flex;gap:8px;align-items:center;font-size:13px;color:var(--muted);margin-top:10px}
+.switch-go{margin-top:10px;display:flex;flex-direction:column;gap:8px}
+.btn-go{display:block;text-align:center;background:var(--accent,#F2B441);color:#2A1D0E;font-weight:700;text-decoration:none;border-radius:12px;padding:12px 14px;font-size:16px}
 </style>
 </head>
 <body>
@@ -182,11 +184,27 @@ const fmt=b=>b>=1e9?(b/1e9).toFixed(1)+' GB':b>=1e6?(b/1e6).toFixed(1)+' MB':Mat
 let I={},tabPicked=false,pwFilled=false;
 function showTab(t){tabPicked=true;$('#pHome').style.display=t==='home'?'block':'none';$('#pOwn').style.display=t==='own'?'block':'none';
   $('#tabHome').classList.toggle('on',t==='home');$('#tabOwn').classList.toggle('on',t==='own')}
+// After switching networks: tappable links to The Shelf at its new address, and a watcher that opens it by itself
+// as soon as this phone or computer is back on that network and the board answers.
+let switchWatch=0;
+function switchLinks(net,urls){
+  urls=[...new Set(urls.filter(Boolean))];
+  clearInterval(switchWatch);
+  const tries=urls.map(u=>u.replace(/\/$/,''));
+  const t0=Date.now();                                   // (give the board a moment to restart first, so the old network can't answer)
+  switchWatch=setInterval(()=>Date.now()-t0>8000&&tries.forEach(u=>{
+    const ctl=new AbortController();setTimeout(()=>ctl.abort(),2500);
+    fetch(u+'/api/board/info',{mode:'no-cors',cache:'no-store',signal:ctl.signal}).then(()=>{clearInterval(switchWatch);location.href=u+'/'}).catch(()=>{});
+  }),3000);
+  return `<div class="switch-go"><div>When your phone or computer is back on <b>${esc(net)}</b>, tap to open The Shelf:</div>`+
+    urls.map(u=>`<a class="btn-go" href="${esc(u)}">${esc(u.replace(/^http:\/\//,'').replace(/\/$/,''))} &rarr;</a>`).join('')+
+    `<div class="tip" style="margin:6px 0 0">This page also opens it by itself as soon as the board answers there. Leave it open while you switch Wi-Fi.</div></div>`;
+}
 async function useOwn(){const ssid=$('#apSsid').value.trim(),pass=$('#apPass').value;
   if(pass&&pass.length<8){$('#wMsg').textContent='The password needs at least 8 characters, or leave it blank.';return}
   if(!pass&&!confirm('No password means anyone nearby can join and see The Shelf. Use an open network?'))return;
-  try{await post('/api/board/hotspot',{pass});$('#wMsg').innerHTML=`Switching to its own Wi-Fi… Join <b>${esc(ssid)}</b>${pass?' with your password':''}, then open <b>http://10.1.1.250</b>.`}catch(e){$('#wMsg').textContent=e.message}}
-async function useHome(){try{await post('/api/board/home');$('#wMsg').textContent='Switching back to '+I.homeSsid+'… Rejoin it on your phone, then open http://'+I.host+'.local.'}catch(e){$('#wMsg').textContent=e.message}}
+  try{await post('/api/board/hotspot',{pass});$('#wMsg').innerHTML=`Switching to its own Wi-Fi… Join <b>${esc(ssid)}</b>${pass?' with your password':''}.`+switchLinks(ssid,['http://10.1.1.250'])}catch(e){$('#wMsg').textContent=e.message}}
+async function useHome(){try{await post('/api/board/home');$('#wMsg').innerHTML=`Switching back to <b>${esc(I.homeSsid)}</b>… Rejoin it on your phone or computer.`+switchLinks(I.homeSsid,[I.homeIp&&'http://'+I.homeIp,'http://'+I.host+'.local'])}catch(e){$('#wMsg').textContent=e.message}}
 let A={};
 async function loadAdmin(){try{A=await fetch('/api/admin/status').then(r=>r.json())}catch(e){return}
   $('#adm').innerHTML=[['Admin password',A.adminSet?'Set':'Not set'],['Mode',A.readOnly?'Read-only':'Anyone on the Wi-Fi can make changes'],['This browser',!A.readOnly?'Can make changes':A.unlocked?'Unlocked for changes':'Locked']]
@@ -247,7 +265,7 @@ async function scan(){const box=$('#nets');box.style.display='block';box.innerHT
     await new Promise(r=>setTimeout(r,800))}box.innerHTML='<div class="empty">Scan failed. Try again.</div>'}
 $('#nets').addEventListener('click',async e=>{const b=e.target.closest('.net');if(!b)return;const ssid=b.dataset.s;let pass='';
   if(b.dataset.l==='1'){pass=prompt('Password for '+ssid);if(pass===null)return}
-  try{await post('/api/board/wifi',{ssid,pass});$('#wMsg').innerHTML=`Joining <b>${esc(ssid)}</b>… The board is restarting. Put your phone back on <b>${esc(ssid)}</b>, then open <b>http://${esc(I.host)}.local</b> or the address on the board's screen.`}catch(err){$('#wMsg').textContent=err.message}});
+  try{await post('/api/board/wifi',{ssid,pass});$('#wMsg').innerHTML=`Joining <b>${esc(ssid)}</b>… The board is restarting. Put your phone back on <b>${esc(ssid)}</b> (the board's screen shows its new address too).`+switchLinks(ssid,[ssid===I.homeSsid&&I.homeIp&&'http://'+I.homeIp,'http://'+I.host+'.local'])}catch(err){$('#wMsg').textContent=err.message}});
 async function forget(){if(!confirm('Forget the Wi-Fi? The board restarts in setup mode ('+I.apName+').'))return;try{await post('/api/board/wifi/forget');$('#wMsg').textContent='Restarting in setup mode…'}catch(e){$('#wMsg').textContent=e.message}}
 async function saveHost(){try{const j=await post('/api/board/settings',{host:$('#host').value});$('#wMsg').textContent=j.restart?'Renamed. Restarting…':'Saved.'}catch(e){$('#wMsg').textContent=e.message}}
 async function deepSleep(){const m=+$('#sleepFor').value;

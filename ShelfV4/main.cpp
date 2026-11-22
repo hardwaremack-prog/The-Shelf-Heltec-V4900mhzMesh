@@ -495,16 +495,19 @@ static void powerTick(uint32_t now) {
   // address?" broadcasts, so after a while nobody could reach it until it was reset)
   if (nap != wifiNap) { WiFi.setSleep(nap ? WIFI_PS_MIN_MODEM : WIFI_PS_NONE); wifiNap = nap; }
 }
-// A battery run flat hurts it: below 3.3 V for two minutes (on battery, not USB), the board says
-// so and goes into deep sleep, waking every hour to look again (or when PRG is pressed).
+// A battery run flat hurts it: at 5% or less for two minutes (on battery, not USB: charging lifts
+// it straight back up), the board says so and switches itself off like Power off does (Wi-Fi,
+// radios, GPS, screen), waking every hour to look again and going straight back to sleep until
+// it's charged past 10%. PRG starts it any time.
 static uint32_t lowSince = 0;
 static void lowBatteryTick(uint32_t now) {
-  if (batteryPercent() < 0 || battV >= 3.30f) { lowSince = 0; return; }
+  int pct = batteryPercent();
+  if (pct < 0 || pct > 5) { lowSince = 0; return; }
   if (!lowSince) { lowSince = now | 1; return; }
   if (now - lowSince < 120000) return;
-  oledMsg("Battery empty", "Charge it, then press", WAKE_BUTTON " to start", "Sleeping now");
+  oledMsg("Battery low (5%)", "Switching off", "Charge it, then press", WAKE_BUTTON " to start");
   delay(3000);
-  sleepMinutes = 60; goDeepSleep();
+  poweringOff = true; sleepMinutes = 60; goDeepSleep();
 }
 
 static void onJoined() {
@@ -861,9 +864,10 @@ void setup() {
   ledBegin();
 
   readBattery();                                    // still flat after waking from a low-battery sleep? sleep on
-  if (batteryPercent() >= 0 && battV < 3.35f && esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER) {
-    oledMsg("Battery empty", "Charge it, then press", WAKE_BUTTON " to start"); delay(2000);
-    sleepMinutes = 60; goDeepSleep();
+  int bootPct = batteryPercent();
+  if (bootPct >= 0 && bootPct < 10 && esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER) {
+    oledMsg("Battery low", "Charge it, then press", WAKE_BUTTON " to start"); delay(2000);
+    poweringOff = true; sleepMinutes = 60; goDeepSleep();
   }
   prefs.begin("shelf", false);
   uint64_t mac = ESP.getEfuseMac();

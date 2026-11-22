@@ -57,7 +57,11 @@ static int tzMin = 0;
 static bool pwrSave = true;                         // power saving while nobody's using it (setting)
 static volatile uint32_t lastWebAt = 0;             // the last web request, any kind
 static bool slowNow = false;                        // running slow: 80 MHz, Wi-Fi napping between beacons                               // the browser's time zone, minutes east of UTC
-static void oledPower(int save) { if (oledOK) oled.setPowerSave(save); }
+// The screen is drawn by its own task on the other core (see screenTask), so everything that
+// touches it takes this lock first.
+static SemaphoreHandle_t oledLock = nullptr;
+struct OledGuard { OledGuard() { if (oledLock) xSemaphoreTakeRecursive(oledLock, portMAX_DELAY); } ~OledGuard() { if (oledLock) xSemaphoreGiveRecursive(oledLock); } };
+static void oledPower(int save) { if (oledOK) { OledGuard g; oled.setPowerSave(save); } }
 static uint32_t lastActivity = 0;
 static int onlineShelves = 0;
 
@@ -107,6 +111,7 @@ static void powerOLED() {
   }
 #endif
   if (!oledOK) return;
+  oled.setBusClock(800000);         // 800 kHz: a whole frame in about 13 ms (400 kHz took 26)
   oled.begin();
   if (oledInline) oled.setDisplayRotation(U8G2_R2);   // it's plugged in turned around: turn the picture to match
   oled.setContrast(200);
@@ -122,6 +127,7 @@ static void powerOLED() {
 #endif
   (void)ok;
   oledOK = true;
+  oled.setBusClock(800000);         // 800 kHz: a whole frame in about 13 ms (400 kHz took 26)
   oled.begin();
   oled.setContrast(200);
 }
@@ -170,6 +176,7 @@ static int batteryPercent() {
 
 static void oledMsg(const char* a, const char* b = "", const char* c = "", const char* d = "") {
   if (!oledOK) return;
+  OledGuard g;
   oled.clearBuffer();
   oled.setFont(u8g2_font_helvB10_tf); oled.drawStr(0, 12, a);
   oled.setFont(u8g2_font_6x10_tf);
@@ -844,8 +851,10 @@ bool remoteBoardCommand(uint8_t cmd, const String& arg, String& out) {
 }
 
 // ------------------------------------------------------------ setup / loop
+static void screenTask(void*);
 void setup() {
   Serial.begin(115200);
+  oledLock = xSemaphoreCreateRecursiveMutex();
   gpio_deep_sleep_hold_dis();                 // let go of pins held through a power-off
 #if defined(SHELF_ESP32)
   gpio_hold_dis((gpio_num_t)OLED_INLINE_VCC);
@@ -916,6 +925,7 @@ void setup() {
   comsBegin();
   markMusicDirty();
   lastActivity = millis();
+  xTaskCreatePinnedToCore(screenTask, "screen", 6144, nullptr, 1, nullptr, 0);
 }
 
 int onlinePeerCount();
@@ -958,6 +968,23 @@ void loop() {
       char b[24]; snprintf(b, sizeof b, "%s %d%%", otaWhat == 'w' ? "Web app" : "Firmware", otaPercent);
       oledMsg("UPDATING", b, "Don't unplug"); otaShown = otaPercent; lastDraw = now;
     }
-  } else if (!btnDown && now - lastDraw > (scrolling ? 50u : 1000u)) { otaShown = -1; onlineShelves = onlinePeerCount(); drawScreen(); lastDraw = now; }
+  } else otaShown = -1;                                     // (the pages are drawn by screenTask)
   delay(5);
+}
+
+// The screen's pages, drawn on core 0 by a task of their own: the web server, Meshed Comms and
+// loop() all share core 1, and a busy moment there (a file transfer, a big shelf listing) used
+// to make the second hand and the scrolling text stutter. ~30 frames a second while something
+// moves, 4 a second otherwise.
+static void screenTask(void*) {
+  TickType_t wake = xTaskGetTickCount();
+  for (;;) {
+    if (oledOK && otaPercent < 0 && !btnDown) {
+      onlineShelves = onlinePeerCount();
+      OledGuard g;
+      drawScreen();
+    }
+    vTaskDelayUntil(&wake, pdMS_TO_TICKS(scrolling ? 33 : 250));
+    if (xTaskGetTickCount() - wake > pdMS_TO_TICKS(500)) wake = xTaskGetTickCount();   // (don't race to catch up after a stall)
+  }
 }

@@ -44,6 +44,11 @@ app = re.sub(r",(\s*\];\s*\nconst TOOL_LABELS)", r"\1", app)   # no trailing com
 coms_label = "Meshed Comms"
 app, n1 = re.subn(r"(\n(\s*)\{ key: 'tidysuite',)", r"\n\2{ key: 'coms', label: '" + coms_label + r"', color: '#E2725B' },\1", app, count=1)
 app, n2 = re.subn(r"(else if \(key === 'tidysuite'\) loadTidySuiteView\(\);)", r"\1\n  else if (key === 'coms') window.loadComsView();", app, count=1)
+# Meshed File Transfer, right after Meshed Comms
+app, nx = re.subn(r"(\{ key: 'coms', label: '[^']*', color: '#E2725B' \},)", r"\1\n  { key: 'xfer', label: 'Meshed File Transfer', color: '#F2B441' },", app, count=1)
+app, ny = re.subn(r"(else if \(key === 'coms'\) window\.loadComsView\(\);)", r"\1\n  else if (key === 'xfer') window.loadXferView();", app, count=1)
+if not (nx and ny):
+    sys.exit("Couldn't add the Meshed File Transfer tab to app.js -- The Shelf's layout changed; update pack_www.py")
 if board == "V4":   # GPS, at the bottom: a V4 with Heltec's GPS kit on its GNSS connector (board.js draws it)
     app, n3 = re.subn(r"(\n(\s*)\{ key: 'tidysuite',[^\n]*\})", r"\1,\n\2{ key: 'gps', label: 'GPS', color: '#3AA0FF' }", app, count=1)
     app, n4 = re.subn(r"(else if \(key === 'coms'\) window\.loadComsView\(\);)", r"\1\n  else if (key === 'gps') window.loadGpsView();", app, count=1)

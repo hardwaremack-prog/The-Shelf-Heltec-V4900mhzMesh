@@ -32,7 +32,7 @@ static bool nowPlayingRecent() { return npAt && millis() - npAt < 600000; }
 void screenShowing(const String& cat, const String& file) {
   bool music = cat == "Music" || cat == "MIDI";
   const char* label = music ? "NOW PLAYING" : cat == "Games" ? "PLAYING GAME" : cat == "Programs" ? "PROGRAM"
-                    : cat == "Videos" ? "WATCHING" : cat == "Pictures" ? "PICTURE" : cat == "Books" ? "READING" : nullptr;
+                    : cat == "Videos" ? "WATCHING" : cat == "Pictures" ? "PICTURE" : cat == "Books" ? "READING" : cat == "Files" ? "FILE COMING IN" : nullptr;
   if (!label) return;
   String n = file;
   if (music) {                                      // songs: just the title
@@ -98,7 +98,8 @@ static void drawNowPage(uint32_t el) {
     }
   } else {                                          // which shelf, along the bottom
     const char* shelf = !strcmp(label, "PLAYING GAME") ? "from the Games shelf" : !strcmp(label, "PROGRAM") ? "from the Programs shelf"
-                      : !strcmp(label, "WATCHING") ? "from the Videos shelf" : !strcmp(label, "PICTURE") ? "from the Pictures shelf" : "from the Books shelf";
+                      : !strcmp(label, "WATCHING") ? "from the Videos shelf" : !strcmp(label, "PICTURE") ? "from the Pictures shelf"
+                      : !strcmp(label, "FILE COMING IN") ? "over Meshed Comms" : "from the Books shelf";
     oled.setFont(u8g2_font_5x7_tf);
     oled.drawStr((128 - oled.getStrWidth(shelf)) / 2, 61, shelf);
   }

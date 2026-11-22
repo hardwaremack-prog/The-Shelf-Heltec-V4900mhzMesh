@@ -1021,3 +1021,122 @@
   setTimeout(tick, 8000);
   setInterval(tick, 30 * 60000);
 })();
+
+// ---- Meshed File Transfer: send a file (up to 5 MB) to a board in range ----
+// A little file manager to pick it (pictures as pictures, songs with their album art, PDFs,
+// HTML games and programs with their thumbnails), the boards this one hears, and the progress.
+(function () {
+  let timer = null, cat = 'Pictures', files = [], picked = null, to = '', filter = '', lastSig = '';
+  const SHELVES = [['Pictures', '🖼️'], ['Music', '🎵'], ['MIDI', '🎹'], ['Books', '📕'], ['Games', '🎮'], ['Programs', '🧰'], ['Videos', '🎬']];
+  const ICON = f => {
+    const e = (f.ext || '').toLowerCase();
+    if (e === 'pdf') return '📕'; if (e === 'html' || e === 'htm') return cat === 'Games' ? '🎮' : '🌐';
+    if (e === 'zip') return '🗜️'; if (e === 'exe' || e === 'msi') return '💾'; if (['mp3', 'm4a', 'wav', 'ogg', 'flac'].includes(e)) return '🎵';
+    if (['mid', 'midi', 'kar'].includes(e)) return '🎹'; if (['mp4', 'webm', 'mov', 'mkv'].includes(e)) return '🎬';
+    if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'].includes(e)) return '🖼️'; if (['txt', 'md', 'epub'].includes(e)) return '📄';
+    return '📦';
+  };
+  const fmt = b => b >= 1048576 ? (b / 1048576).toFixed(b >= 10485760 ? 0 : 1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB';
+  const dur = s => s < 60 ? Math.max(1, Math.round(s)) + ' s' : s < 3600 ? Math.round(s / 60) + ' min' : (s / 3600).toFixed(1) + ' h';
+  const viewing = () => typeof state !== 'undefined' && state.view === 'xfer';
+  const post = (u, d) => fetch(u, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(d || {}) });
+  const RATE = { lora: 1800, wifi: 15000 };                 // bytes a second, roughly, for the estimate
+
+  async function loadFiles() {
+    files = [];
+    try { files = await fetch('/api/files?category=' + encodeURIComponent(cat)).then(r => r.json()); } catch (e) {}
+    if (!Array.isArray(files)) files = files.files || [];
+    renderFiles();
+  }
+  function renderFiles() {
+    const box = document.getElementById('xfFiles'); if (!box) return;
+    const q = filter.toLowerCase();
+    const list = files.filter(f => !q || f.name.toLowerCase().includes(q)).sort((a, b) => a.name.localeCompare(b.name));
+    box.innerHTML = list.length ? list.map((f, i) => {
+      const big = f.size > 5 * 1048576;
+      const pic = cat === 'Pictures' && f.size < 3 * 1048576 ? f.url : (f.artUrl || f.thumbUrl || '');
+      return `<button class="xf-file ${picked && picked.name === f.name ? 'on' : ''} ${big ? 'big' : ''}" data-i="${files.indexOf(f)}" ${big ? 'disabled title="Over 5 MB: too big to send"' : ''}>
+        <span class="xf-thumb">${pic ? `<img data-qsrc="${escapeHtml(pic)}" alt="">` : `<span>${ICON(f)}</span>`}</span>
+        <span class="xf-name">${escapeHtml(f.name)}</span><span class="xf-size">${big ? 'over 5 MB' : fmt(f.size)}</span></button>`;
+    }).join('') : `<div class="coms-neigh" style="margin:8px 0">${files.length ? 'Nothing matches.' : 'Nothing on this shelf yet.'}</div>`;
+    box.querySelectorAll('.xf-file').forEach(b => {
+      b.onclick = () => { picked = files[+b.dataset.i]; renderFiles(); renderSend(); };
+      b.ondblclick = () => { const f = files[+b.dataset.i]; if (f && f.url) window.open(f.url, '_blank'); };   // a look before sending
+    });
+  }
+  let st = null;
+  function renderSend() {
+    const el2 = document.getElementById('xfSend'); if (!el2 || !st) return;
+    const est = picked ? picked.size / (st.lora ? RATE.lora : RATE.wifi) : 0;
+    el2.innerHTML = `<select id="xfTo">${st.peers.length ? st.peers.map(p => `<option value="${p.node}" ${p.node === to ? 'selected' : ''}>${escapeHtml(p.name)} (${p.rssi ? p.rssi + ' dBm' : '2.4 GHz'}, heard ${dur(p.ago)} ago)</option>`).join('') : '<option value="">No boards heard yet</option>'}</select>
+      <button class="coms-btn" id="xfGo" ${picked && st.peers.length && !st.sending && !st.receiving ? '' : 'disabled'}>Send${picked ? ' ' + escapeHtml(picked.name.length > 28 ? picked.name.slice(0, 26) + '…' : picked.name) : ''}</button>
+      <div class="coms-neigh" style="width:100%;margin:6px 0 0">${picked ? `${fmt(picked.size)}: about ${dur(est)} over ${st.lora ? '900 MHz' : '2.4 GHz'} (faster over 2.4 GHz when an ESP32 is on either end).` : 'Pick a file below, up to 5 MB.'}</div>`;
+    const sel = el2.querySelector('#xfTo'); sel.onchange = () => { to = sel.value; };
+    if (!to && st.peers.length) to = st.peers[0].node;
+    el2.querySelector('#xfGo').onclick = async () => {
+      const r = await post('/api/coms/files/send', { node: to || sel.value, cat, name: picked.name });
+      if (!r.ok) { const j = await r.json().catch(() => ({})); alert(j.error || 'That didn’t work.'); }
+      refresh(true);
+    };
+  }
+  function render(s) {
+    st = s;
+    const content = el('#content');
+    if (!document.getElementById('xfWrap')) {
+      content.innerHTML = `<div class="coms" id="xfWrap">
+        <div class="coms-card" id="xfTop"></div>
+        <div class="coms-card" id="xfProg" style="display:none"></div>
+        <div class="coms-card"><div class="xf-head"><b>Send a file</b><span class="coms-neigh" style="margin:0">to a board this one hears directly</span></div>
+          <div class="xf-send" id="xfSend"></div>
+          <div class="xf-shelves" id="xfShelves">${SHELVES.map(([c, i]) => `<button class="coms-chip ${c === cat ? 'on' : ''}" data-c="${c}">${i} ${c}</button>`).join('')}</div>
+          <input id="xfFilter" class="xf-filter" placeholder="Find a file… (double-click one to open it)" autocomplete="off">
+          <div class="xf-files" id="xfFiles"><div class="coms-neigh">Loading…</div></div></div>
+        <div class="coms-card"><b>Sent and received</b><div id="xfHist"></div></div>
+        <div class="coms-card coms-off" style="font-size:13px"><b>How it works:</b> the two boards agree over Meshed Comms, then move to a fast link of their own: on 900 MHz, 923.3 MHz at its fastest setting (about 2 KB a second: a 1 MB picture in about 9 minutes, 5 MB in about 45, with less range than chat: hundreds of yards to a mile or so), or over 2.4 GHz when an ESP32 is involved (much faster, about Wi-Fi's range). Chat pauses on those two boards meanwhile. Missing pieces are sent again, the whole file is checked at the end, and it lands on the same shelf on the other board.</div>
+      </div>`;
+      content.querySelectorAll('#xfShelves .coms-chip').forEach(b => b.onclick = () => { cat = b.dataset.c; picked = null; content.querySelectorAll('#xfShelves .coms-chip').forEach(x => x.classList.toggle('on', x === b)); loadFiles(); renderSend(); });
+      const fi = content.querySelector('#xfFilter'); fi.oninput = () => { filter = fi.value; renderFiles(); };
+      loadFiles();
+    }
+    const top = document.getElementById('xfTop');
+    top.innerHTML = `<div class="coms-top">
+        <label class="toggle-switch"><input type="checkbox" id="xfAccept" ${s.accept ? 'checked' : ''}><span class="toggle-slider"></span></label>
+        <span class="power-label">${s.accept ? 'Taking files from other boards' : 'Not taking files'}</span>
+        <span class="sub">${!s.enabled ? 'Meshed Comms is off: switch it on in the Meshed Comms tab to send or receive files.' : `Files that arrive go on the same shelf they came from. Links here: ${[s.lora && '900 MHz', s.wifi && '2.4 GHz'].filter(Boolean).join(' and ') || 'none yet'}.`}</span></div>`;
+    top.querySelector('#xfAccept').onchange = async e => { await post('/api/coms/files/settings', { accept: e.target.checked }); refresh(true); };
+    const pg = document.getElementById('xfProg');
+    if (s.sending || s.receiving) {
+      const pct = s.size ? Math.min(100, s.bytes * 100 / s.size) : 0, rate = s.secs > 2 && s.bytes ? s.bytes / s.secs : 0;
+      pg.style.display = 'block';
+      pg.innerHTML = `<div class="xf-head"><b>${s.sending ? 'Sending' : 'Receiving'} ${escapeHtml(s.name)}</b><span class="coms-neigh" style="margin:0">${s.sending ? 'to' : 'from'} ${escapeHtml(s.peer)}${s.band ? ' · ' + s.band : ''}</span></div>
+        <div class="xf-bar"><div style="width:${pct.toFixed(1)}%"></div></div>
+        <div class="xf-head" style="margin-top:6px"><span class="coms-neigh" style="margin:0">${escapeHtml(s.status)} · ${fmt(s.bytes)} of ${fmt(s.size)} (${pct.toFixed(0)}%)${rate ? ` · ${fmt(rate)}/s · about ${dur((s.size - s.bytes) / rate)} to go` : ''}</span>
+        <button class="coms-btn secondary" id="xfStop">Stop</button></div>`;
+      pg.querySelector('#xfStop').onclick = () => post('/api/coms/files/cancel').then(() => refresh(true));
+    } else if (s.status) {
+      pg.style.display = 'block';
+      pg.innerHTML = `<div class="coms-neigh" style="margin:0">${s.lastOk ? '✅' : '⚠️'} ${escapeHtml(s.status)}</div>`;
+    } else pg.style.display = 'none';
+    document.getElementById('xfHist').innerHTML = s.history.length ? s.history.map(h => `<div class="xf-hist">
+        <span>${h.ok ? (h.sent ? '⬆️' : '⬇️') : '⚠️'}</span>
+        <span><b>${escapeHtml(h.name)}</b><small>${h.sent ? 'to' : 'from'} ${escapeHtml(h.peer)} · ${fmt(h.size)}${h.ok ? ' · ' + dur(h.secs) : ''} · ${escapeHtml(h.note)}</small></span></div>`).join('')
+      : '<div class="coms-neigh">Nothing yet.</div>';
+    renderSend();
+  }
+  async function refresh(force) {
+    if (!viewing()) { clearInterval(timer); timer = null; return; }
+    let s; try { s = await fetch('/api/coms/files', { cache: 'no-store' }).then(r => r.json()); } catch (e) { return; }
+    const sig = JSON.stringify([s.phase, s.bytes, s.status, s.history.length, s.accept, s.peers.map(p => p.node + p.name), s.enabled]);
+    if (!force && sig === lastSig) return;
+    lastSig = sig;
+    if (document.activeElement && document.activeElement.id === 'xfTo') return;
+    render(s);
+  }
+  window.loadXferView = function () {
+    setToolHeader('Meshed File Transfer', 'Send a file, up to 5 MB, to a board in range', null, null);
+    el('#content').innerHTML = ''; lastSig = ''; picked = null; filter = '';
+    refresh(true);
+    clearInterval(timer);
+    timer = setInterval(() => refresh(false), 1500);
+  };
+})();

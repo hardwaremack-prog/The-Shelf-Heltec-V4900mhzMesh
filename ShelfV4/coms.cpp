@@ -39,6 +39,7 @@ struct SX1262 {
 #include <WiFi.h>
 #include <esp_now.h>
 #include <esp_wifi.h>
+#include "esp_rom_crc.h"
 
 // Heltec V4 radio wiring (from Heltec's datasheet / Meshtastic's heltec_v4 variant)
 #define LORA_NSS   8
@@ -59,6 +60,8 @@ static const float FREQ = 915.0;
 static const uint8_t MAGIC0 = 'S', MAGIC1 = '9';
 static const uint8_t T_TEXT = 1, T_SYNC_REQ = 2, T_REPLAY = 3, T_RECEIPT = 4;   // packet types (byte 2)
 static const uint8_t T_HELLO = 5, T_ADMIN_REQ = 6, T_ADMIN_RESP = 7, T_WHO = 8;
+// file transfer: offer / accept / reject go over the mesh as usual; the rest over the transfer link
+static const uint8_t T_FOFFER = 20, T_FACCEPT = 21, T_FREJECT = 22, T_FDATA = 23, T_FWEND = 24, T_FACK = 25, T_FDONE = 26, T_FDONEACK = 27, T_FCANCEL = 28;
 // Remote admin: commands are sent in the clear (amateur rules don't allow hiding a
 // message's meaning) and signed with an 8-byte HMAC-SHA256 made from the target board's
 // admin password, with a rising counter so a recorded command can't be played back.
@@ -141,7 +144,7 @@ static void IRAM_ATTR onRx() { rxFlag = true; }
 static bool nowUp = false;
 static uint32_t nowSentCount = 0, nowHeardCount = 0;
 struct NowPkt { uint8_t len; uint8_t buf[250]; };
-static const uint8_t NOW_RING = 8;
+static const uint8_t NOW_RING = 24;               // (room for a file transfer's bursts)
 static NowPkt nowRing[NOW_RING];
 static volatile uint8_t nowW = 0, nowR = 0;
 static portMUX_TYPE nowMux = portMUX_INITIALIZER_UNLOCKED;
@@ -377,10 +380,15 @@ static void noteNeighbor(uint32_t sender, float rssi, float snr) {
   meetNeighbor(fresh);
 }
 static void handleMeshPacket(const uint8_t* b, size_t len, float rssi, float snr);
+static void xferPacket(const uint8_t* b, size_t len, float rssi);
 
 static void handlePacket(const uint8_t* b, size_t len, float rssi, float snr) {
   if (len < 8 || b[0] != MAGIC0 || b[1] != MAGIC1) return;
   uint8_t type = b[2];
+  if (type >= T_FOFFER && type <= T_FCANCEL) {
+    if (type <= T_FREJECT && len >= 17) { uint32_t sender; memcpy(&sender, b + 13, 4); if (sender != myNode) noteNeighbor(sender, rssi, snr); }
+    xferPacket(b, len, rssi); return;
+  }
   if (type == T_SYNC_REQ) { handleSyncRequest(b, len); return; }
   if (type >= T_HELLO && type <= T_WHO) {
     if (len < 17) return;
@@ -610,6 +618,354 @@ static void handleMeshPacket(const uint8_t* b, size_t len, float rssi, float snr
   }
 }
 
+// ------------------------------------------------------------ Meshed file transfer
+// Sends a file (up to 5 MB) from one board to another it hears directly. The offer and the answer
+// go over the mesh as usual; then both boards move to a fast link just for the two of them:
+//   900 MHz (both have LoRa): 923.3 MHz, 500 kHz wide, SF7 - about 10x the mesh's speed (and less
+//     range than the mesh's own settings: think a few hundred yards to a mile, not miles).
+//     Meshed Comms chat on 915 MHz pauses on those two boards while it runs.
+//   2.4 GHz (a plain ESP32 on either end): ESP-NOW frames, faster still, about Wi-Fi's range.
+// The file goes 224 bytes a packet, 32 packets a window; after each window the receiver says
+// which it got, and only the missing ones are sent again. A CRC-32 over the whole file checks it
+// at the end, and it lands on the same shelf on the other board (named like the original).
+static const size_t XF_CHUNK = 224, XF_WIN = 32;
+static const uint32_t XF_MAX = 5UL * 1024 * 1024;
+static const float XF_FREQ = 923.3;
+enum { XF_IDLE, XF_S_PREP, XF_S_OFFER, XF_S_SEND, XF_S_ACK, XF_S_DONE, XF_R_RECV };
+enum { XT_LORA = 1, XT_NOW = 2 };
+struct XferHist { bool sent, ok; String name, cat, peer, note; uint32_t size, secs; uint64_t at; };
+static struct {
+  volatile int phase = XF_IDLE;
+  uint32_t xid = 0, peer = 0, size = 0, crc = 0, chunks = 0, w = 0, bytes = 0;
+  uint8_t transport = 0;
+  String peerName, cat, name, path, tmp, status;
+  uint32_t t0 = 0, last = 0, sentAt = 0; int tries = 0;
+  uint32_t have = 0, need = 0, nIn = 0;          // this window: chunks received (bits), wanted (bits), how many
+  uint8_t* buf = nullptr;                        // one window
+  uint32_t crcRun = 0;                           // receiver: running CRC of what's written
+  bool cancel = false;
+  uint32_t lingerUntil = 0;                      // receiver: stay on the link a moment to answer a repeated "done"
+  bool lastOk = false;
+} X;
+static std::vector<XferHist> xhist;
+static bool xferAccept = true, loraFast = false;
+static String xferPending;                       // a send asked for by the web page: "node\tcat\tname"
+static portMUX_TYPE xMux = portMUX_INITIALIZER_UNLOCKED;
+
+static void loraMode(bool fast) {
+#ifndef SHELF_NO_RADIO
+  if (!radioUp || fast == loraFast) return;
+  radio->standby();
+  if (fast) { radio->setFrequency(XF_FREQ); radio->setBandwidth(500.0); radio->setSpreadingFactor(7); radio->setPreambleLength(8); }
+  else { radio->setFrequency(FREQ); radio->setBandwidth(125.0); radio->setSpreadingFactor(9); radio->setPreambleLength(16); }
+  loraFast = fast;
+  rxFlag = false;
+  radio->startReceive();
+#else
+  (void)fast;
+#endif
+}
+static void xSend(const uint8_t* b, size_t len) {               // on the transfer link
+  if (X.transport == XT_LORA) {
+#ifndef SHELF_NO_RADIO
+    if (!radioUp) return;
+    radio->setOutputPower(CHIP_DBM[level]);
+    femTx(true); radio->transmit(b, len); femTx(false);
+    rxFlag = false; radio->startReceive();
+#endif
+  } else if (nowUp) {
+    for (int i = 0; i < 5; i++) { if (esp_now_send(BCAST, b, len) == ESP_OK) break; vTaskDelay(pdMS_TO_TICKS(4)); }
+    vTaskDelay(pdMS_TO_TICKS(5));                              // (keeps the receiver's ring from overflowing)
+  }
+}
+static size_t xHead(uint8_t* b, uint8_t type) { b[0] = MAGIC0; b[1] = MAGIC1; b[2] = type; memcpy(b + 3, &X.xid, 4); return 7; }
+static void xFinish(bool ok, const String& note) {
+  XferHist h; h.sent = X.phase != XF_R_RECV; h.ok = ok; h.name = X.name; h.cat = X.cat; h.peer = X.peerName.length() ? X.peerName : hex8(X.peer);
+  h.note = note; h.size = X.size; h.secs = (millis() - X.t0) / 1000; h.at = nowMs();
+  xhist.insert(xhist.begin(), h); if (xhist.size() > 12) xhist.pop_back();
+  if (!ok && X.tmp.length()) { FsGuard g; store->remove(X.tmp); }
+  if (X.buf) { free(X.buf); X.buf = nullptr; }
+  X.status = note; X.lastOk = ok;
+  loraMode(false);
+  X.phase = XF_IDLE;
+  comsLastLine = String(ok ? (h.sent ? "Sent " : "Got ") : "File: ") + (ok ? X.name : note); comsLastAt = millis();
+}
+static String peerNameOf(uint32_t node) {
+  for (auto& m : members) if (m.node == node && m.name.length()) return m.name;
+  for (auto& n : neighbors) if (n.node == node && n.name.length()) return n.name;
+  return hex8(node);
+}
+static uint32_t winCount(uint32_t w) { uint32_t first = w * XF_WIN; return std::min<uint32_t>(XF_WIN, X.chunks - first); }
+static uint32_t chunkLen(uint32_t seq) { uint32_t off = seq * XF_CHUNK; return std::min<uint32_t>(XF_CHUNK, X.size - off); }
+
+// ---- sender
+static bool xLoadWindow() {
+  uint32_t n = winCount(X.w), off = X.w * XF_WIN * XF_CHUNK, want = std::min<uint32_t>(n * XF_CHUNK, X.size - off);
+  FsGuard g;
+  File f = store->open(X.path, FILE_READ);
+  if (!f) return false;
+  f.seek(off);
+  size_t got = f.read(X.buf, want); f.close();
+  X.nIn = n; X.need = n == 32 ? 0xFFFFFFFFu : ((1u << n) - 1);
+  return got == want;
+}
+static void xSendWindow() {
+  uint8_t p[256];
+  for (uint32_t i = 0; i < X.nIn && !X.cancel; i++) {
+    if (!(X.need >> i & 1)) continue;
+    uint32_t seq = X.w * XF_WIN + i;
+    size_t n = xHead(p, T_FDATA); memcpy(p + n, &seq, 4); n += 4;
+    uint32_t len = chunkLen(seq); memcpy(p + n, X.buf + i * XF_CHUNK, len); n += len;
+    xSend(p, n);
+  }
+  size_t n = xHead(p, T_FWEND); memcpy(p + n, &X.w, 4); n += 4; p[n++] = X.nIn;
+  xSend(p, n);
+  X.phase = XF_S_ACK; X.sentAt = millis();
+}
+static void xferStartSend(uint32_t node, const String& cat, const String& name) {
+  X = decltype(X)();
+  X.phase = XF_S_PREP; X.peer = node; X.peerName = peerNameOf(node); X.cat = cat; X.name = name;
+  X.path = "/" + cat + "/" + name; X.t0 = millis(); X.xid = esp_random() | 1;
+  // size and CRC-32
+  {
+    FsGuard g;
+    File f = store->open(X.path, FILE_READ);
+    if (!f || f.isDirectory()) { xFinish(false, "Couldn't open the file."); return; }
+    X.size = f.size();
+    if (!X.size || X.size > XF_MAX) { f.close(); xFinish(false, X.size ? "Files up to 5 MB only." : "That file is empty."); return; }
+    uint8_t* tmp = (uint8_t*)malloc(4096);
+    if (!tmp) { f.close(); xFinish(false, "Not enough memory."); return; }
+    uint32_t crc = 0; size_t r;
+    while ((r = f.read(tmp, 4096)) > 0) crc = esp_rom_crc32_le(crc, tmp, r);
+    free(tmp); f.close();
+    X.crc = crc;
+  }
+  X.chunks = (X.size + XF_CHUNK - 1) / XF_CHUNK;
+  X.buf = (uint8_t*)malloc(XF_WIN * XF_CHUNK);
+  if (!X.buf) { xFinish(false, "Not enough memory."); return; }
+  X.phase = XF_S_OFFER; X.tries = 0; X.sentAt = 0; X.status = "Asking " + X.peerName + "...";
+}
+static void xSendOffer() {
+  uint8_t b[256]; uint32_t id = esp_random(); markSeen(id);
+  size_t n = header(b, T_FOFFER, id); b[3] = 0;                 // direct only: not relayed
+  memcpy(b + n, &X.peer, 4); n += 4; memcpy(b + n, &X.xid, 4); n += 4; memcpy(b + n, &X.size, 4); n += 4; memcpy(b + n, &X.crc, 4); n += 4;
+  b[n++] = (radioUp && bandLora) ? 1 : 0;
+  size_t cl = std::min<size_t>(X.cat.length(), 15); b[n++] = cl; memcpy(b + n, X.cat.c_str(), cl); n += cl;
+  size_t nl = std::min<size_t>(X.name.length(), 200 - n); b[n++] = nl; memcpy(b + n, X.name.c_str(), nl); n += nl;
+  queueTx(b, n, 0);
+}
+
+// ---- receiver
+static void xAnswer(uint8_t type, uint32_t to, uint32_t xid, uint8_t v) {   // accept / reject, over the mesh, now
+  uint8_t b[64]; uint32_t id = esp_random(); markSeen(id);
+  size_t n = header(b, type, id); b[3] = 0;
+  memcpy(b + n, &to, 4); n += 4; memcpy(b + n, &xid, 4); n += 4; b[n++] = v;
+  for (int k = 0; k < 2; k++) {                                // twice, to be sure it's heard before we move
+    if (nowUp) esp_now_send(BCAST, b, n);
+#ifndef SHELF_NO_RADIO
+    if (radioUp && !loraFast) { radio->setOutputPower(CHIP_DBM[level]); femTx(true); radio->transmit(b, n); femTx(false); rxFlag = false; radio->startReceive(); }
+#endif
+    vTaskDelay(pdMS_TO_TICKS(120));
+  }
+}
+static void xWriteWindow() {
+  uint32_t n = winCount(X.w), off = X.w * XF_WIN * XF_CHUNK, len = std::min<uint32_t>(n * XF_CHUNK, X.size - off);
+  {
+    FsGuard g;
+    File f = store->open(X.tmp, FILE_APPEND);
+    if (f) { f.write(X.buf, len); f.close(); }
+  }
+  X.crcRun = esp_rom_crc32_le(X.crcRun, X.buf, len);
+  X.bytes = off + len;
+  X.w++; X.have = 0;
+}
+
+static void xferPacket(const uint8_t* b, size_t len, float rssi) {
+  uint8_t type = b[2];
+  if (type <= T_FREJECT) {                                     // over the mesh: offers and answers
+    if (len < 26) return;
+    uint32_t sender, to, xid; memcpy(&sender, b + 13, 4); memcpy(&to, b + 17, 4); memcpy(&xid, b + 21, 4);
+    if (to != myNode) return;
+    if (type == T_FOFFER) {
+      if (len < 35) return;
+      uint32_t size, crc; memcpy(&size, b + 25, 4); memcpy(&crc, b + 29, 4);
+      bool theyLora = b[33] & 1; size_t p = 34;
+      size_t cl = b[p++]; if (p + cl >= len) return;
+      String cat; for (size_t i = 0; i < cl; i++) cat += (char)b[p + i]; p += cl;
+      size_t nl = b[p++]; if (p + nl > len) return;
+      String name; for (size_t i = 0; i < nl; i++) name += (char)b[p + i];
+      if (X.phase == XF_R_RECV && X.xid == xid) return;        // (a repeat: we're already on it)
+      uint8_t why = 0;
+      if (X.phase != XF_IDLE) why = 1;                         // busy
+      else if (!xferAccept) why = 2;                           // not taking files
+      else if (!size || size > XF_MAX || !isCategory(cat)) why = 3;
+      else if (storeTotal && storeTotal - storeUsed < (uint64_t)size + 65536) why = 4;   // no room
+      uint8_t tr = (theyLora && radioUp && bandLora) ? XT_LORA : nowUp ? XT_NOW : 0;
+      if (!why && !tr) why = 5;
+      if (why) { xAnswer(T_FREJECT, sender, xid, why); return; }
+      X = decltype(X)();
+      X.buf = (uint8_t*)malloc(XF_WIN * XF_CHUNK);
+      if (!X.buf) { xAnswer(T_FREJECT, sender, xid, 6); return; }
+      X.xid = xid; X.peer = sender; X.peerName = peerNameOf(sender); X.size = size; X.crc = crc; X.cat = cat;
+      X.name = sanitizeFilename(name); X.chunks = (size + XF_CHUNK - 1) / XF_CHUNK; X.transport = tr;
+      X.tmp = String(TMP_ROOT "/xfer-") + hex8(xid) + ".part";
+      { FsGuard g; store->remove(X.tmp); File f = store->open(X.tmp, FILE_WRITE); if (f) f.close(); }
+      X.t0 = X.last = millis(); X.status = "Receiving from " + X.peerName;
+      X.phase = XF_R_RECV;
+      xAnswer(T_FACCEPT, sender, xid, tr);
+      if (tr == XT_LORA) loraMode(true);
+      screenShowing("Files", X.name);
+      return;
+    }
+    if (xid != X.xid || sender != X.peer) return;
+    if (type == T_FACCEPT && X.phase == XF_S_OFFER) {
+      X.transport = b[25] == XT_LORA ? XT_LORA : XT_NOW;
+      if (X.transport == XT_LORA) loraMode(true);
+      vTaskDelay(pdMS_TO_TICKS(400));                          // the receiver is moving over too
+      X.w = 0; X.t0 = millis(); X.status = "Sending to " + X.peerName;
+      if (!xLoadWindow()) { xFinish(false, "Couldn't read the file."); return; }
+      X.phase = XF_S_SEND;
+    } else if (type == T_FREJECT && X.phase == XF_S_OFFER) {
+      static const char* const WHY[] = {"", "is busy with another file", "isn't taking files (switched off there)", "can't take that file",
+                                        "hasn't room for it", "has no radio in common", "is short of memory"};
+      uint8_t w = b[25] < 7 ? b[25] : 3;
+      xFinish(false, X.peerName + " " + WHY[w] + ".");
+    }
+    return;
+  }
+  // on the transfer link
+  if (len < 7) return;
+  uint32_t xid; memcpy(&xid, b + 3, 4);
+  if (xid != X.xid) return;
+  X.last = millis();
+  if (X.phase == XF_R_RECV || X.lingerUntil) {
+    if (type == T_FDATA && len > 11 && X.phase == XF_R_RECV) {
+      uint32_t seq; memcpy(&seq, b + 7, 4);
+      if (seq / XF_WIN != X.w) return;
+      uint32_t i = seq % XF_WIN, l = std::min<uint32_t>(len - 11, XF_CHUNK);
+      memcpy(X.buf + i * XF_CHUNK, b + 11, l); X.have |= 1u << i;
+    } else if (type == T_FWEND && len >= 12) {
+      uint32_t w; memcpy(&w, b + 7, 4);
+      uint8_t p[32]; size_t n = xHead(p, T_FACK); memcpy(p + n, &w, 4); n += 4;
+      uint32_t bits;
+      if (w + 1 == X.w || X.phase != XF_R_RECV) bits = 0xFFFFFFFFu;   // already written (our answer got lost)
+      else if (w == X.w) {
+        uint32_t cnt = winCount(w), full = cnt == 32 ? 0xFFFFFFFFu : ((1u << cnt) - 1);
+        bits = X.have;
+        if ((X.have & full) == full) { xWriteWindow(); bits = 0xFFFFFFFFu; }
+      } else return;
+      memcpy(p + n, &bits, 4); n += 4;
+      xSend(p, n);
+    } else if (type == T_FDONE && len >= 15) {
+      uint32_t crc; memcpy(&crc, b + 7, 4);
+      bool ok = X.phase == XF_R_RECV ? (X.w * XF_WIN >= X.chunks && crc == X.crc && X.crcRun == X.crc) : X.lastOk;
+      if (X.phase == XF_R_RECV) {
+        if (ok) {                                              // into the shelf, named like the original
+          FsGuard g;
+          String dir = "/" + X.cat; mkdirs(dir);
+          String fin = uniqueName(dir, X.name);
+          ok = moveFile(X.tmp, dir + "/" + fin);
+          if (ok) { X.name = fin; X.tmp = ""; invalidateCounts(); }
+        }
+        X.lingerUntil = millis() + 3000;
+        uint8_t p[16]; size_t n = xHead(p, T_FDONEACK); p[n++] = ok;
+        xSend(p, n);
+        String note = ok ? "Saved to " + X.cat : "The file didn't check out (sent again, it may work).";
+        if (ok && X.cat == "Music") markMusicDirty();
+        int keepT = X.transport; uint32_t keepX = X.xid; uint32_t linger = X.lingerUntil;
+        xFinish(ok, note);                                    // (back on the mesh once lingering is over)
+        if (keepT == XT_LORA) loraMode(true);
+        X.xid = keepX; X.transport = keepT; X.lingerUntil = linger; X.lastOk = ok;
+      } else { uint8_t p[16]; size_t n = xHead(p, T_FDONEACK); p[n++] = ok; xSend(p, n); }
+    } else if (type == T_FCANCEL && X.phase == XF_R_RECV) xFinish(false, X.peerName + " stopped sending.");
+    return;
+  }
+  if (X.phase == XF_S_ACK && type == T_FACK && len >= 15) {
+    uint32_t w, bits; memcpy(&w, b + 7, 4); memcpy(&bits, b + 11, 4);
+    if (w != X.w) return;
+    uint32_t full = X.nIn == 32 ? 0xFFFFFFFFu : ((1u << X.nIn) - 1);
+    if ((bits & full) == full) {
+      X.bytes = std::min<uint32_t>((X.w + 1) * XF_WIN * XF_CHUNK, X.size);
+      X.w++; X.tries = 0;
+      if (X.w * XF_WIN >= X.chunks) {
+        uint8_t p[16]; size_t n = xHead(p, T_FDONE); memcpy(p + n, &X.crc, 4); n += 4; memcpy(p + n, &X.size, 4); n += 4;
+        xSend(p, n); X.phase = XF_S_DONE; X.sentAt = millis();
+      } else if (!xLoadWindow()) xFinish(false, "Couldn't read the file.");
+      else X.phase = XF_S_SEND;
+    } else { X.need = full & ~bits; X.phase = XF_S_SEND; }
+  } else if (X.phase == XF_S_DONE && type == T_FDONEACK && len >= 8) {
+    xFinish(b[7] != 0, b[7] ? "Sent to " + X.peerName : X.peerName + " got it, but it didn't check out. Try again.");
+  }
+}
+// called from the Coms task, every turn
+static void xferStep() {
+  String want;
+  portENTER_CRITICAL(&xMux); want = xferPending; xferPending = ""; portEXIT_CRITICAL(&xMux);
+  if (want.length() && X.phase == XF_IDLE) {
+    int a = want.indexOf('\t'), c = want.indexOf('\t', a + 1);
+    xferStartSend(strtoul(want.substring(0, a).c_str(), nullptr, 16), want.substring(a + 1, c), want.substring(c + 1));
+  }
+  uint32_t now = millis();
+  if (X.lingerUntil && X.phase == XF_IDLE && (int32_t)(now - X.lingerUntil) >= 0) { X.lingerUntil = 0; loraMode(false); }
+  if (X.cancel && X.phase != XF_IDLE) {
+    if (X.phase != XF_S_OFFER && X.phase != XF_S_PREP) { uint8_t p[16]; size_t n = xHead(p, T_FCANCEL); p[n++] = 0; xSend(p, n); }
+    xFinish(false, "Stopped."); return;
+  }
+  switch (X.phase) {
+    case XF_S_OFFER:
+      if (!X.sentAt || now - X.sentAt > 4000) {
+        if (X.tries++ >= 4) { xFinish(false, "No answer from " + X.peerName + "."); return; }
+        xSendOffer(); X.sentAt = now;
+      }
+      break;
+    case XF_S_SEND: xSendWindow(); break;
+    case XF_S_ACK:
+      if (now - X.sentAt > (X.transport == XT_LORA ? 700u : 250u)) {
+        if (++X.tries > 12) { xFinish(false, "Lost touch with " + X.peerName + "."); return; }
+        uint8_t p[16]; size_t n = xHead(p, T_FWEND); memcpy(p + n, &X.w, 4); n += 4; p[n++] = X.nIn;
+        xSend(p, n); X.sentAt = now;
+      }
+      break;
+    case XF_S_DONE:
+      if (now - X.sentAt > 900) {
+        if (++X.tries > 8) { xFinish(false, "No word back at the end from " + X.peerName + "."); return; }
+        uint8_t p[16]; size_t n = xHead(p, T_FDONE); memcpy(p + n, &X.crc, 4); n += 4; memcpy(p + n, &X.size, 4); n += 4;
+        xSend(p, n); X.sentAt = now;
+      }
+      break;
+    case XF_R_RECV:
+      if (now - X.last > 12000) xFinish(false, "Lost touch with " + X.peerName + ".");
+      break;
+  }
+}
+bool xferBusy() { return X.phase != XF_IDLE || X.lingerUntil; }
+
+static String xferJson() {
+  String s = String("{\"accept\":") + (xferAccept ? "true" : "false") + ",\"phase\":" + (int)X.phase +
+    ",\"sending\":" + (X.phase >= XF_S_PREP && X.phase <= XF_S_DONE ? "true" : "false") + ",\"receiving\":" + (X.phase == XF_R_RECV ? "true" : "false") +
+    ",\"name\":\"" + jsonEsc(X.name) + "\",\"cat\":\"" + jsonEsc(X.cat) + "\",\"peer\":\"" + jsonEsc(X.peerName) + "\",\"size\":" + X.size +
+    ",\"bytes\":" + X.bytes + ",\"secs\":" + (X.t0 ? (millis() - X.t0) / 1000.0 : 0) + ",\"band\":\"" + (X.transport == XT_LORA ? "900 MHz" : X.transport == XT_NOW ? "2.4 GHz" : "") +
+    "\",\"status\":\"" + jsonEsc(X.status) + "\",\"lastOk\":" + (X.lastOk ? "true" : "false") + ",\"max\":" + XF_MAX +
+    ",\"lora\":" + (radioUp && bandLora ? "true" : "false") + ",\"wifi\":" + (nowUp ? "true" : "false") + ",\"enabled\":" + (enabled ? "true" : "false") + ",\"peers\":[";
+  xSemaphoreTakeRecursive(comsLock, portMAX_DELAY);
+  bool first = true;
+  for (auto& n : neighbors) {
+    if (n.node == myNode || nowMs() - n.at > 30ULL * 60 * 1000) continue;
+    String nm = n.name.length() ? n.name : peerNameOf(n.node);
+    if (!first) s += ","; first = false;
+    s += "{\"node\":\"" + hex8(n.node) + "\",\"name\":\"" + jsonEsc(nm) + "\",\"rssi\":" + String(n.rssi, 0) + ",\"ago\":" + (uint32_t)((nowMs() - n.at) / 1000) + "}";
+  }
+  xSemaphoreGiveRecursive(comsLock);
+  s += "],\"history\":[";
+  for (size_t i = 0; i < xhist.size(); i++) {
+    auto& h = xhist[i];
+    if (i) s += ",";
+    s += String("{\"sent\":") + (h.sent ? "true" : "false") + ",\"ok\":" + (h.ok ? "true" : "false") + ",\"name\":\"" + jsonEsc(h.name) + "\",\"cat\":\"" + jsonEsc(h.cat) +
+         "\",\"peer\":\"" + jsonEsc(h.peer) + "\",\"note\":\"" + jsonEsc(h.note) + "\",\"size\":" + h.size + ",\"secs\":" + h.secs + ",\"t\":" + String((double)h.at, 0) + "}";
+  }
+  return s + "]}";
+}
+
 static bool linked = false;
 static uint32_t nowRetryAt = 0, radioRetryAt = 0;
 static void comsTask(void*) {
@@ -646,6 +1002,8 @@ static void comsTask(void*) {
       nowHeardCount++;
       handlePacket(p.buf, p.len, 0, 0);                    // (0 dBm: heard over 2.4 GHz)
     }
+    xferStep();
+    if (X.phase == XF_S_SEND) continue;                    // (a window goes straight out, window after window)
     // just came on: ask the neighbors for the last 12 hours (again after 2 minutes, in case nobody heard)
     if (syncAsks < 2 && (int32_t)(millis() - syncAskAt) >= 0) {
       uint8_t q[256]; size_t n = 0;
@@ -697,6 +1055,10 @@ static void comsTask(void*) {
     for (size_t i = 0; i < txq.size(); i++) if ((int32_t)(millis() - txq[i].due) >= 0) { t = txq[i]; txq.erase(txq.begin() + i); have = true; break; }
     xSemaphoreGiveRecursive(comsLock);
     if (have && !t.nowSent) { nowSend(t.buf, t.len); t.nowSent = true; }   // 2.4 GHz goes straight out
+    if (have && radioUp && loraFast) {                     // the radio's on the transfer link: 900 MHz waits
+      xSemaphoreTakeRecursive(comsLock, portMAX_DELAY); t.due = millis() + 1000; txq.push_back(t); xSemaphoreGiveRecursive(comsLock);
+      have = false;
+    }
     if (have && radioUp) {
       int cad = radio->scanChannel();
       if (cad == RADIOLIB_LORA_DETECTED) {
@@ -730,6 +1092,7 @@ void comsBegin() {
   enabled = cprefs.getBool("on", false);
   receiptsOn = cprefs.getBool("receipts", true);
   bandLora = cprefs.getBool("lora", true); bandNow = cprefs.getBool("now", true);
+  xferAccept = cprefs.getBool("xaccept", true);
 #ifdef SHELF_NO_RADIO
   bandNow = true;                                    // 2.4 GHz is all a plain ESP32 has
 #endif
@@ -752,6 +1115,24 @@ void comsBegin() {
 // ------------------------------------------------------------ HTTP
 bool handleComsApi(AsyncWebServerRequest* r, const String& url, WebRequestMethod m) {
   if (!url.startsWith("/api/coms")) return false;
+  if (url == "/api/coms/files" && m == HTTP_GET) { sendJson(r, 200, xferJson()); return true; }
+  if (url.startsWith("/api/coms/files/") && m == HTTP_POST) {
+    JsonDocument b; parseBody(r, b);
+    if (url == "/api/coms/files/send") {
+      if (!enabled) { sendErr(r, 400, "Switch Meshed Comms on first."); return true; }
+      if (xferBusy()) { sendErr(r, 409, "A file is already on its way. Wait for it, or stop it."); return true; }
+      String node = b["node"] | "", cat = b["cat"] | "", name = b["name"] | "";
+      if (!isCategory(cat) || !name.length() || name.indexOf('/') >= 0 || node.length() != 8) { sendErr(r, 400, "Pick a board and a file."); return true; }
+      portENTER_CRITICAL(&xMux); xferPending = node + "\t" + cat + "\t" + name; portEXIT_CRITICAL(&xMux);
+      X.status = "Getting ready..."; X.cancel = false;
+      sendJson(r, 200, "{\"ok\":true}"); return true;
+    }
+    if (url == "/api/coms/files/cancel") { X.cancel = true; sendJson(r, 200, "{\"ok\":true}"); return true; }
+    if (url == "/api/coms/files/settings") {
+      if (b["accept"].is<bool>()) { xferAccept = b["accept"].as<bool>(); cprefs.putBool("xaccept", xferAccept); }
+      sendJson(r, 200, xferJson()); return true;
+    }
+  }
   if (url == "/api/coms" && m == HTTP_GET) {
     String s = String("{\"enabled\":") + (enabled ? "true" : "false") + ",\"radio\":" + ((radioUp || nowUp) ? "true" : "false") +
       ",\"lora\":" + (radioUp ? "true" : "false") + ",\"wifi\":" + (nowUp ? "true" : "false") + ",\"bandLora\":" + (bandLora ? "true" : "false") + ",\"bandWifi\":" + (bandNow ? "true" : "false") + ",\"channel\":" + wifiChannel() +

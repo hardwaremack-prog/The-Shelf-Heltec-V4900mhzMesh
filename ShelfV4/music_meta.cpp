@@ -108,12 +108,18 @@ static bool readId3(const String& path, String& artist, String& title, const Str
 namespace {
 struct OggIn {
   File& f; uint8_t lace[255]; int nseg = 0, si = 0, left = 0; bool endAfter = false;
+  uint8_t buf[512]; int bp = 0, bn = 0;          // read in 512-byte pieces (a byte at a time took seconds per cover)
   explicit OggIn(File& file) : f(file) {}
+  int rd() {
+    if (bp >= bn) { int n = f.read(buf, sizeof buf); bp = 0; bn = n > 0 ? n : 0; if (!bn) return -1; }
+    return buf[bp++];
+  }
+  bool rdn(uint8_t* d, int n) { for (int i = 0; i < n; i++) { int c = rd(); if (c < 0) return false; d[i] = (uint8_t)c; } return true; }
   bool page() {
     uint8_t h[27];
-    if (f.read(h, 27) != 27 || memcmp(h, "OggS", 4) != 0) return false;
+    if (!rdn(h, 27) || memcmp(h, "OggS", 4) != 0) return false;
     nseg = h[26]; si = 0;
-    return f.read(lace, nseg) == nseg;
+    return rdn(lace, nseg);
   }
   int get() {                      // next byte of the current packet; -1 at its end, -2 at the end of the file
     while (left == 0) {
@@ -121,7 +127,7 @@ struct OggIn {
       if (si >= nseg) { if (!page()) return -2; continue; }
       left = lace[si++]; endAfter = left < 255;
     }
-    left--; return f.read();
+    left--; return rd();
   }
   bool skipPacket() { int c; while ((c = get()) >= 0) {} return c == -1; }
   bool u32le(uint32_t& v) { v = 0; for (int i = 0; i < 4; i++) { int c = get(); if (c < 0) return false; v |= (uint32_t)c << (8 * i); } return true; }

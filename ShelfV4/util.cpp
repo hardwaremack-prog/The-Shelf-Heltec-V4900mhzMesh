@@ -627,11 +627,15 @@ std::vector<String> dirNames(const String& path) {
 bool hasName(const std::vector<String>& n, const String& name) { return std::binary_search(n.begin(), n.end(), name); }
 // Art and thumbnail files are named <16 hex digits>.jpg: keep just the numbers (8 bytes each)
 std::vector<uint64_t> dirHashes(const String& path) {
-  std::vector<DirEnt> v; listDir(path, v);
-  std::vector<uint64_t> h; h.reserve(v.size());
-  for (auto& e : v) if (!e.dir && e.name.length() >= 16) h.push_back(strtoull(e.name.substring(0, 16).c_str(), nullptr, 16));
-  std::vector<DirEnt>().swap(v);
+  // straight from the folder, a name at a time: listing it whole first (a String per file) took ~100 bytes
+  // a file, which a plain ESP32 can't spare next to a big Music list once every song has its art saved
+  std::vector<uint64_t> h;
+  forEachEntry(path, [&](const char* name, uint64_t, bool dir) {
+    if (!dir && strlen(name) >= 16) { char b[17]; memcpy(b, name, 16); b[16] = 0; h.push_back(strtoull(b, nullptr, 16)); }
+    return true;
+  });
   std::sort(h.begin(), h.end());
+  h.shrink_to_fit();
   return h;
 }
 bool hasHash(const std::vector<uint64_t>& h, const String& hex16) { return std::binary_search(h.begin(), h.end(), (uint64_t)strtoull(hex16.c_str(), nullptr, 16)); }

@@ -4,7 +4,7 @@
 // Same microSD wiring as Heltec Shelf Lite, so a board wired for that works as-is.
 #pragma once
 
-#define FW_VERSION "1.19.2"
+#define FW_VERSION "1.19.3"
 // Every board's own Wi-Fi has the same fixed address you can bookmark: http://10.1.1.250
 // (phones and laptops that join get 10.1.1.100 and up).
 #define AP_IP           10, 1, 1, 250

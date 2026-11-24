@@ -195,6 +195,7 @@ static void scanNetwork() {
   if (ntohl(m32) < 0xFFFFFF00u) m32 = htonl(0xFFFFFF00u);   // big networks: the 254 around us
   uint32_t base = ntohl(me32 & m32), count = ~ntohl(m32);
   std::vector<uint32_t> ips;
+  ips.reserve(std::min<uint32_t>(count, 1024));      // one block up front, not a dozen growing copies
   for (uint32_t i = 1; i < count && ips.size() < 1024; i++) { uint32_t ip = htonl(base + i); if (ip != me32) ips.push_back(ip); }
   lastScan.range = IPAddress(htonl(base + 1)).toString() + "\xE2\x80\x93" + IPAddress(htonl(base + count - 1)).toString();
   std::vector<uint32_t> open;

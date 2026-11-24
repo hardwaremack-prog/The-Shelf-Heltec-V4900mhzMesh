@@ -7,6 +7,7 @@
 #include <WiFi.h>
 #include <ESPmDNS.h>
 #include <DNSServer.h>
+#include <new>
 #include <Preferences.h>
 #include <SD.h>
 #include <SPI.h>
@@ -852,8 +853,19 @@ bool remoteBoardCommand(uint8_t cmd, const String& arg, String& out) {
 
 // ------------------------------------------------------------ setup / loop
 static void screenTask(void*);
+// Out of memory for a moment (two things starting at once on a board without PSRAM): wait for
+// the other tasks to give some back, instead of restarting the board straight away.
+static void memoryWait() {
+  static uint32_t since = 0;
+  uint32_t now = millis();
+  if (!since || now - since > 5000) since = now;
+  if (now - since > 2500) { since = 0; Serial.printf("[shelf] out of memory (free %u, largest block %u)\n", ESP.getFreeHeap(), ESP.getMaxAllocHeap()); throw std::bad_alloc(); }
+  vTaskDelay(pdMS_TO_TICKS(25));
+}
 void setup() {
   Serial.begin(115200);
+  Serial.printf("\n[shelf] The Shelf %s for %s starting\n", FW_VERSION, BOARD_NAME);
+  std::set_new_handler(memoryWait);
   oledLock = xSemaphoreCreateRecursiveMutex();
   gpio_deep_sleep_hold_dis();                 // let go of pins held through a power-off
 #if defined(SHELF_ESP32)

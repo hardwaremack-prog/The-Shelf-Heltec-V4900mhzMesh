@@ -383,6 +383,20 @@ static bool getJson(const String& url, JsonDocument& doc, JsonDocument& filter) 
   return !e;
 }
 
+// A secure (https) connection needs about 40 KB in one piece. A plain ESP32 has no extra memory
+// (PSRAM), so it only tries when there's room; otherwise the browser with The Shelf open hands the
+// weather and news over instead. Running short here used to restart the board.
+static volatile bool newsBusy = false;          // the news task (below) is running
+static bool tlsRoom(const char* what) {
+#if defined(SHELF_ESP32)
+  uint32_t big = ESP.getMaxAllocHeap(), fr = ESP.getFreeHeap();
+  if (millis() < 90000 || big < 45000 || fr < 75000) {
+    Serial.printf("[shelf] %s: not now (free %u, largest block %u) - a browser with The Shelf open can pass it on\n", what, fr, big);
+    return false;
+  }
+#endif
+  return true;
+}
 static void wxTask(void*) {
   if (isnan(wxLat) && !ipLocate()) {
     wxErr = "Couldn't work out where the board is. Set its location below.";
@@ -403,9 +417,10 @@ static void wxTask(void*) {
   vTaskDelete(nullptr);
 }
 void wxHistoryTick() {
-  if (!staOK || histBusy || time(nullptr) < 1700000000) return;
+  if (!staOK || histBusy || newsBusy || time(nullptr) < 1700000000) return;   // one secure fetch at a time
   wxOpen();
   if (histAt && millis() - histAt < 3600000) return;
+  if (!tlsRoom("weather")) { histAt = millis() - 3300000; return; }           // try again in 5 minutes
   histBusy = true;
   if (xTaskCreatePinnedToCore(wxTask, "wxhist", 12288, nullptr, 1, nullptr, 1) != pdPASS) { histBusy = false; histAt = millis() - 3300000; }
 }
@@ -415,7 +430,7 @@ void wxHistoryTick() {
 // with internet, through rss2json (the feed as JSON). A browser with The Shelf open passes them on
 // too (POST /api/board/news), the way TidyOS does.
 static char news[NEWS_MAX][NEWS_LEN]; static int newsN = 0; static char newsSrc[16] = "";
-static uint32_t newsAt = 0; static volatile bool newsBusy = false;
+static uint32_t newsAt = 0;
 static portMUX_TYPE newsMux = portMUX_INITIALIZER_UNLOCKED;
 // plain ASCII for the screen's fonts: curly quotes, dashes and the like made plain, the rest dropped
 static void plainCopy(char* out, size_t max, const char* in) {
@@ -459,6 +474,7 @@ static void newsTask(void*) {
 }
 void newsTick() {
   if (!staOK || newsBusy || histBusy || (newsAt && millis() - newsAt < 1800000)) return;   // (one secure fetch at a time)
+  if (!tlsRoom("news")) { newsAt = millis() - 1500000; return; }                            // try again in 5 minutes
   newsBusy = true;
   if (xTaskCreatePinnedToCore(newsTask, "news", 12288, nullptr, 1, nullptr, 1) != pdPASS) { newsBusy = false; newsAt = millis() - 1500000; }
 }

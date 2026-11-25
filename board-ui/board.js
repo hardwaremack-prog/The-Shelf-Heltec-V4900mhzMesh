@@ -1140,3 +1140,86 @@
     timer = setInterval(() => refresh(false), 1500);
   };
 })();
+
+// ---- Opus songs on iPhone / iPad ----
+// Apple's browsers (every browser on an iPhone uses Safari's engine) play Opus in an Ogg file
+// badly or not at all, and the board's Music shelf may be all .opus songs. So there, the song is
+// fetched once, decoded right here (libopus in WebAssembly, from jsDelivr, the first time), and the
+// player gets plain WAV audio instead. Seeking, the visualizer and the lock screen all work as usual,
+// and the board only sends the song once.
+(function () {
+  if (typeof playTrackFile !== 'function') return;
+  const ua = navigator.userAgent;
+  const apple = /iPad|iPhone|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1) ||
+                (/Safari\//.test(ua) && !/Chrome|Chromium|CriOS|FxiOS|EdgiOS|Android/.test(ua) && /Macintosh/.test(ua));
+  const forced = /[?&]opushelp=1/.test(location.search);
+  if (!apple && !forced) return;
+  const LIB = 'https://cdn.jsdelivr.net/npm/ogg-opus-decoder@1.7.5/dist/ogg-opus-decoder.min.js';
+  let libP = null;
+  function lib() {
+    if (window['ogg-opus-decoder']) return Promise.resolve(window['ogg-opus-decoder']);
+    if (!libP) libP = new Promise((ok, no) => {
+      const s = document.createElement('script'); s.src = LIB; s.charset = 'UTF-8';
+      s.onload = () => window['ogg-opus-decoder'] ? ok(window['ogg-opus-decoder']) : no(new Error('decoder missing'));
+      s.onerror = () => { libP = null; no(new Error('no internet for the Opus decoder')); };
+      document.head.appendChild(s);
+    });
+    return libP;
+  }
+  // the decoded songs kept for a quick replay (each is about 11 MB a minute)
+  const cache = new Map();
+  function remember(url, blobUrl, bytes) {
+    cache.set(url, { blobUrl, bytes });
+    let total = 0; for (const v of cache.values()) total += v.bytes;
+    for (const [k, v] of cache) { if (total <= 120e6 || cache.size <= 1) break; if (k === url) continue; URL.revokeObjectURL(v.blobUrl); total -= v.bytes; cache.delete(k); }
+  }
+  async function toWav(url, say) {
+    const hit = cache.get(url); if (hit) return hit.blobUrl;
+    const mod = await lib();
+    say('Getting the song…');
+    const res = await fetch(url); if (!res.ok) throw new Error('The board said ' + res.status);
+    const data = new Uint8Array(await res.arrayBuffer());
+    say('Getting the song ready…');
+    const dec = new mod.OggOpusDecoderWebWorker(); await dec.ready;
+    const parts = []; let frames = 0, ch = 2, rate = 48000;
+    try {
+      for (let off = 0; off < data.length; off += 65536) {        // a piece at a time: little memory beyond the result
+        const r = await dec.decode(data.subarray(off, Math.min(data.length, off + 65536)));
+        if (!r || !r.samplesDecoded) continue;
+        ch = Math.min(2, r.channelData.length); rate = r.sampleRate || rate;
+        const n = r.samplesDecoded, pcm = new Int16Array(n * ch);
+        for (let c = 0; c < ch; c++) { const src = r.channelData[c]; for (let i = 0; i < n; i++) { const v = src[i]; pcm[i * ch + c] = v >= 1 ? 32767 : v <= -1 ? -32768 : v * 32767; } }
+        parts.push(pcm); frames += n;
+      }
+      const end = await dec.flush?.(); if (end && end.samplesDecoded) {
+        const n = end.samplesDecoded, pcm = new Int16Array(n * ch);
+        for (let c = 0; c < ch; c++) { const src = end.channelData[c]; for (let i = 0; i < n; i++) { const v = src[i]; pcm[i * ch + c] = v >= 1 ? 32767 : v <= -1 ? -32768 : v * 32767; } }
+        parts.push(pcm); frames += n;
+      }
+    } finally { dec.free(); }
+    if (!frames) throw new Error("That song couldn't be decoded");
+    const bytes = frames * ch * 2, h = new DataView(new ArrayBuffer(44));
+    const w4 = (o, s) => { for (let i = 0; i < 4; i++) h.setUint8(o + i, s.charCodeAt(i)); };
+    w4(0, 'RIFF'); h.setUint32(4, 36 + bytes, true); w4(8, 'WAVE'); w4(12, 'fmt '); h.setUint32(16, 16, true);
+    h.setUint16(20, 1, true); h.setUint16(22, ch, true); h.setUint32(24, rate, true); h.setUint32(28, rate * ch * 2, true);
+    h.setUint16(32, ch * 2, true); h.setUint16(34, 16, true); w4(36, 'data'); h.setUint32(40, bytes, true);
+    const blobUrl = URL.createObjectURL(new Blob([h.buffer, ...parts], { type: 'audio/wav' }));
+    remember(url, blobUrl, bytes);
+    return blobUrl;
+  }
+  const real = playTrackFile;
+  let token = 0;
+  window.playTrackFile = playTrackFile = function (f, idx) {
+    const my = ++token;
+    if (!f || !/\.opus(\?|$)/i.test(String(f.url || '').split('#')[0])) return real.apply(this, arguments);
+    const self = this, title = document.getElementById('miniTitle'), mini = document.getElementById('miniPlayer');
+    const say = t => { if (my !== token) return; if (mini) mini.hidden = false; if (title) title.textContent = f.name + ' · ' + t; };
+    try { audio.pause(); } catch (e) {}
+    toWav(f.url, say).then(u => { if (my === token) real.call(self, Object.assign({}, f, { url: u }), idx); })
+      .catch(e => {
+        if (my !== token) return;
+        say(e.message + ' (trying it straight)');
+        real.call(self, f, idx);                                  // newer iPhones may manage on their own
+      });
+  };
+})();

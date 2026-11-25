@@ -258,7 +258,7 @@ static void messagingTask(void*) {
   }
 }
 
-void messagingBegin() {
+void messagingBegin(bool search) {
   peersLock = xSemaphoreCreateMutex();
   mprefs.begin("msg", false);
   me.id = mprefs.getString("id", "");
@@ -269,7 +269,8 @@ void messagingBegin() {
   char t[17]; snprintf(t, sizeof t, "%08x%08x", esp_random(), esp_random()); instanceTag = t;
   mkdirs(CONV_DIR);
   loadKnown();
-  xTaskCreatePinnedToCore(messagingTask, "msg", 10240, nullptr, 1, nullptr, 0);
+  if (search) xTaskCreatePinnedToCore(messagingTask, "msg", 10240, nullptr, 1, nullptr, 0);
+  else Serial.println("[shelf] finding other Shelves is switched off (memory switch)");
 }
 
 void messagingLoop() {}

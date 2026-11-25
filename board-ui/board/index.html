@@ -21,6 +21,12 @@ h2{font-size:12px;text-transform:uppercase;letter-spacing:1px;color:var(--muted)
 .kv+.kv{border-top:1px solid var(--divider)}
 .kv span:first-child{color:var(--muted)}
 .kv span:last-child{text-align:right;word-break:break-all}
+.memrow{display:flex;align-items:center;gap:12px;padding:11px 14px;font-size:14px;cursor:pointer}
+.memrow+.memrow{border-top:1px solid var(--divider)}
+.memrow div{flex:1;min-width:0}.memrow small{display:block;color:var(--muted);font-size:12px;margin-top:2px}
+.memrow input{appearance:none;-webkit-appearance:none;width:42px;height:24px;border-radius:12px;background:var(--divider);position:relative;flex:none;cursor:pointer;transition:background .15s}
+.memrow input::after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff;transition:left .15s}
+.memrow input:checked{background:var(--accent)}.memrow input:checked::after{left:21px}
 .btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
 button,.btn{font:inherit;font-weight:600;font-size:14px;border-radius:999px;padding:9px 16px;border:1px solid var(--divider);background:var(--surface);color:var(--text);cursor:pointer;text-decoration:none;display:inline-block}
 button.pri,.btn.pri{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
@@ -173,6 +179,15 @@ label.l{font-size:13px;color:var(--muted)}
   <p class="tip">The biggest power users after that: <b>Meshed Comms</b> (its radio listens all the time; switch it off in the Coms tab when you don't need it), the board's <b>own Wi-Fi</b> (it can't nap while phones may join), and the <b>screen</b> (let it sleep after 5 minutes, above).</p>
   <div class="msg" id="pwrMsg"></div>
 
+  <div id="memSec" style="display:none">
+  <h2>Memory</h2>
+  <p class="tip">A plain ESP32 has no extra memory chip, so everything shares about 300 KB. When it runs short the board can restart. Switch off what you don't use to leave more room for the web pages, music and pictures. Changes take effect after a restart.</p>
+  <div class="card" id="memNow" style="margin-bottom:8px"></div>
+  <div class="card" id="memList"></div>
+  <div class="btns" style="margin-top:8px"><button class="pri" id="memSaveBtn" onclick="memSave()" disabled>Save and restart</button></div>
+  <div class="msg" id="memMsg"></div>
+  </div>
+
   <div class="btns" style="margin-top:24px"><button onclick="reboot()">Restart the board</button><button class="bad" onclick="powerOff()">Power off</button></div>
   <p class="tip">Power off switches everything off it can: Wi-Fi, Meshed Comms, the GPS, the screen and the light. Nobody can reach it until you press its PRG button (or EN/RST, or unplug and plug it back in). It still draws a tiny trickle from a battery, so unplug the battery to store it for weeks.</p>
   <p class="tip">Hold PRG for 6 seconds and let go to forget the Wi-Fi and go back to setup mode. Keep holding to 12 seconds to clear a forgotten admin password and turn read-only off.</p>
@@ -234,6 +249,23 @@ async function thShow(){let j;try{j=await fetch('/api/thumbs/import').then(r=>r.
 async function thImport(){const f=$('#thFrom').value.trim();if(!f){$('#thMsg').textContent='Type the address of The Shelf on your computer (it shows it on its own settings page).';return}
   try{await post('/api/thumbs/import',{from:f});thShow()}catch(e){$('#thMsg').textContent=e.message;$('#thMsg').className='msg err'}}
 thShow();
+const MEM=[
+  ['coms','Meshed Comms and Meshed File Transfer','About 25 KB: its task, the message log and the 2.4 GHz link to other boards.'],
+  ['find','Finding other Shelves and Messages','About 15 KB: looks around your Wi-Fi for other Shelves to message.'],
+  ['screen','Little screen','About 8 KB: the task that draws the screen\'s pages. Off also blanks the screen.'],
+  ['wx','Weather fetched by the board','Up to about 55 KB while it runs. Off: a browser with The Shelf open still brings the weather and the graph.'],
+  ['news','News fetched by the board','Up to about 55 KB while it runs. Off: a browser with The Shelf open still brings the headlines.'],
+  ['tags','Song names and album art','Reads the artist, title and cover inside each song in the background. Off: songs show by file name.'],
+  ['mdns','Name address (.local)','About 6 KB. Off: open the board by its number address instead (shown above).']];
+let memDirty=false;
+function memRender(){if(I.board!=='ESP32'||!I.mem)return;$('#memSec').style.display='block';
+  const k=b=>Math.round(b/1024)+' KB';
+  $('#memNow').innerHTML=[['Free now',k(I.heap)],['Largest free piece',k(I.maxBlock||0)],['Lowest since it started',k(I.minHeap||0)]].map(r=>`<div class="kv"><span>${r[0]}</span><span>${r[1]}</span></div>`).join('');
+  if(memDirty)return;
+  $('#memList').innerHTML=MEM.map(m=>`<label class="memrow"><div>${m[1]}<small>${m[2]}</small></div><input type="checkbox" data-k="${m[0]}" ${I.mem[m[0]]?'checked':''} onchange="memDirty=true;$('#memSaveBtn').disabled=false"></label>`).join('')}
+async function memSave(){const d={};document.querySelectorAll('#memList input').forEach(c=>d[c.dataset.k]=c.checked);
+  try{await post('/api/board/memory',d);$('#memMsg').className='msg';$('#memMsg').textContent='Saved. Restarting…';$('#memSaveBtn').disabled=true;await post('/api/board/reboot',{}).catch(()=>{});memDirty=false;setTimeout(load,12000)}
+  catch(e){$('#memMsg').textContent=e.message;$('#memMsg').className='msg err'}}
 async function post(u,d){const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d||{})});let j={};try{j=await r.json()}catch(e){}if(!r.ok)throw new Error(j.error||'Something went wrong');return j}
 async function load(){try{I=await fetch('/api/board/info').then(r=>r.json())}catch(e){return}
   if(I.storage==='microSD card')$('#cardSec').style.display='block';
@@ -251,6 +283,7 @@ async function load(){try{I=await fetch('/api/board/info').then(r=>r.json())}cat
   if(!pwFilled){$('#apSsid').value=I.apName;$('#apPass').value=I.apPass||'';pwFilled=true}
   $('#backHome').style.display=I.hotspot&&I.homeSsid?'inline-block':'none';$('#homeName').textContent=I.homeSsid;
   {const tz=-new Date().getTimezoneOffset();if(!I.timeSet||I.tz!==tz)post('/api/board/time',{ms:Date.now(),tz}).catch(()=>{})}
+  memRender();
   if(document.activeElement!==$('#scrMode'))$('#scrMode').value=I.scrSleep?'sleep':'on';
   if(document.activeElement!==$('#pwrMode'))$('#pwrMode').value=I.pwrSave===false?'off':'on';
   if(document.activeElement!==$('#host'))$('#host').value=I.host;

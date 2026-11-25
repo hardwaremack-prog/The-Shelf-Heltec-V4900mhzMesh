@@ -166,8 +166,8 @@ void filesUploadDone(AsyncWebServerRequest* r);
 void portalMediaDone(AsyncWebServerRequest* r);
 bool serveContent(AsyncWebServerRequest* r, const String& url);   // /shared /play /data-files
 
-void messagingBegin();
-void comsBegin();
+void messagingBegin(bool search = true);   // search: false = no Shelf finder task (memory switch)
+void comsBegin(bool on = true);            // on: false = Meshed Comms off for good (memory switch)
 bool handleComsApi(AsyncWebServerRequest* r, const String& url, WebRequestMethod m);
 bool comsOn();
 bool comsWifiOn();      // Meshed Comms using 2.4 GHz (the Wi-Fi radio has to keep listening)
@@ -175,6 +175,9 @@ extern String comsLastLine; extern uint32_t comsLastAt;
 void messagingLoop();
 void musicMetaLoop();
 void markMusicDirty();
+// Memory switches (plain ESP32): what runs, chosen in the settings page, read at start-up
+struct MemSwitches { bool coms = true, find = true, screen = true, wx = true, news = true, tags = true, mdns = true; };
+extern MemSwitches mem;
 void recordVisitor(const String& ip);
 int  countCategory(const String& cat);
 void invalidateCounts();

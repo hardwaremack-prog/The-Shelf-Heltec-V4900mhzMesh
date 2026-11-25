@@ -365,7 +365,9 @@ static void refreshStats() {
 }
 
 // ------------------------------------------------------------ Wi-Fi
+MemSwitches mem;
 static void startMDNS() {
+  if (!mem.mdns) return;                    // switched off to save memory
   if (mdnsOK || !MDNS.begin(hostName.c_str())) return;
   MDNS.addService("http", "tcp", 80);
   MDNS.addService("http", "tcp", 8080);
@@ -553,7 +555,9 @@ bool handleBoardApi(AsyncWebServerRequest* r, const String& url, WebRequestMetho
       ",\"setup\":" + (firstSetup ? "true" : "false") + ",\"homeSsid\":\"" + jsonEsc(wifiSSID) + "\",\"homeIp\":\"" + prefs.getString("homeip", "") + "\",\"apOpen\":" + (ownPass.length() >= 8 ? "false" : "true") + ",\"apPass\":\"" + jsonEsc(ownPass) + "\"" +
       ",\"clients\":" + (apActive ? WiFi.softAPgetStationNum() : 0) + ",\"timeSet\":" + (time(nullptr) > 1700000000 ? "true" : "false") + ",\"tz\":" + tzMin + ",\"scrSleep\":" + (scrAutoSleep ? "true" : "false") + ",\"pwrSave\":" + (pwrSave ? "true" : "false") + ",\"cpuMhz\":" + getCpuFrequencyMhz() + ",\"temp\":" + String(temperatureRead(), 1) +
       ",\"uptime\":" + (millis() / 1000) +
-      ",\"sdPins\":\"" + String(sdOnAlt ? "CS 4, MISO 6, CLK 47, MOSI 48" : SD_PINS) + "\",\"gps\":" + (gpsAvailable() ? "true" : "false") + ",\"sdRetries\":" + String(sdRetries) + ",\"sdFailures\":" + String(sdFailures) + ",\"heap\":" + ESP.getFreeHeap() + ",\"psram\":" + ESP.getPsramSize() + "}";
+      ",\"sdPins\":\"" + String(sdOnAlt ? "CS 4, MISO 6, CLK 47, MOSI 48" : SD_PINS) + "\",\"gps\":" + (gpsAvailable() ? "true" : "false") + ",\"sdRetries\":" + String(sdRetries) + ",\"sdFailures\":" + String(sdFailures) + ",\"heap\":" + ESP.getFreeHeap() + ",\"maxBlock\":" + ESP.getMaxAllocHeap() + ",\"minHeap\":" + ESP.getMinFreeHeap() + ",\"psram\":" + ESP.getPsramSize() +
+      ",\"mem\":{\"coms\":" + (mem.coms ? "true" : "false") + ",\"find\":" + (mem.find ? "true" : "false") + ",\"screen\":" + (mem.screen ? "true" : "false") +
+      ",\"wx\":" + (mem.wx ? "true" : "false") + ",\"news\":" + (mem.news ? "true" : "false") + ",\"tags\":" + (mem.tags ? "true" : "false") + ",\"mdns\":" + (mem.mdns ? "true" : "false") + "}}";
     sendJson(r, 200, s); return true;
   }
   if (url == "/api/board/wifi/scan") {
@@ -605,6 +609,11 @@ bool handleBoardApi(AsyncWebServerRequest* r, const String& url, WebRequestMetho
   if (url == "/api/board/powersave") {        // {on:true}: slow down while nobody's using it
     pwrSave = b["on"] | true; prefs.putBool("pwrsave", pwrSave);
     sendJson(r, 200, String("{\"ok\":true,\"pwrSave\":") + (pwrSave ? "true" : "false") + "}"); return true;
+  }
+  if (url == "/api/board/memory") {           // {coms:false, ...}: what runs, from the next start
+    static const char* const K[][2] = {{"coms","m_coms"},{"find","m_find"},{"screen","m_screen"},{"wx","m_wx"},{"news","m_news"},{"tags","m_tags"},{"mdns","m_mdns"}};
+    for (auto& k : K) if (b[k[0]].is<bool>()) prefs.putBool(k[1], b[k[0]].as<bool>());
+    sendJson(r, 200, "{\"ok\":true,\"restart\":true}"); return true;
   }
   if (url == "/api/board/screen") {           // {sleep:true}: the screen sleeps after 5 minutes; false: stays on
     scrAutoSleep = b["sleep"] | false; prefs.putBool("scrsleep", scrAutoSleep); screenWake();
@@ -906,6 +915,12 @@ void setup() {
   tzMin = prefs.getInt("tz", 0);
   scrAutoSleep = prefs.getBool("scrsleep", true);
   pwrSave = prefs.getBool("pwrsave", true);
+#if defined(SHELF_ESP32)
+  mem.coms = prefs.getBool("m_coms", true);   mem.find = prefs.getBool("m_find", true);
+  mem.screen = prefs.getBool("m_screen", true); mem.wx = prefs.getBool("m_wx", true);
+  mem.news = prefs.getBool("m_news", true);   mem.tags = prefs.getBool("m_tags", true);
+  mem.mdns = prefs.getBool("m_mdns", true);
+#endif
   firstSetup = !hotspotMode && !wifiSSID.length();
   adminBegin();
   locksBegin();
@@ -933,11 +948,12 @@ void setup() {
   setupServer(server8080);
   ledWebUp();
   btBegin();                  // plain ESP32: hands Bluetooth's unused memory to the web server
-  messagingBegin();
-  comsBegin();
+  messagingBegin(mem.find);
+  comsBegin(mem.coms);
   markMusicDirty();
   lastActivity = millis();
-  xTaskCreatePinnedToCore(screenTask, "screen", 6144, nullptr, 1, nullptr, 0);
+  if (mem.screen) xTaskCreatePinnedToCore(screenTask, "screen", 6144, nullptr, 1, nullptr, 0);
+  else if (oledOK) { oledMsg("Screen off", "to save memory", "(board settings)"); delay(1500); oledPower(1); oledOK = false; }
 }
 
 int onlinePeerCount();

@@ -220,6 +220,7 @@ static bool readTags(const String& path, String& artist, String& title, const St
 
 static void musicMetaRun();
 void musicMetaLoop() {
+  if (!mem.tags) return;                   // switched off to save memory
   if (!dirty || millis() - dirtyAt < 4000) return;
   // Short of memory (a plain ESP32 with Bluetooth on, say): try again later rather than crash.
   if (ESP.getMaxAllocHeap() < 24 * 1024 || musicReaders > 0 || (streamsActive > 0 && ESP.getPsramSize() == 0)) { dirtyAt = millis() + 26000; return; }

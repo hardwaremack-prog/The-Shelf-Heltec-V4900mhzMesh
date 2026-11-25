@@ -1081,9 +1081,11 @@ static void comsTask(void*) {
 // Deep sleep (main.cpp): radios off first
 void comsSleep() { if (radioUp) radioStop(); if (nowUp) nowStop(); }
 
-void comsBegin() {
+static bool comsAllowed = true;      // false: switched off in the memory switches (nothing loaded, no task)
+void comsBegin(bool on) {
   comsLock = xSemaphoreCreateRecursiveMutex();
   cprefs.begin("coms", false);
+  comsAllowed = on;
   uint64_t mac = ESP.getEfuseMac();
   (void)mac;
   myNode = meshNodeId();
@@ -1096,6 +1098,7 @@ void comsBegin() {
 #ifdef SHELF_NO_RADIO
   bandNow = true;                                    // 2.4 GHz is all a plain ESP32 has
 #endif
+  if (!on) { enabled = false; Serial.println("[shelf] Meshed Comms is switched off (memory switch)"); return; }
   loadLog();
   for (auto& l : logRam) if (l.indexOf("\"mine\":true") >= 0) {     // my messages, so receipts match
     int p = l.indexOf("\"id\":\""); if (p >= 0) myIds.push_back(strtoul(l.substring(p + 6, p + 14).c_str(), nullptr, 16));
@@ -1258,6 +1261,7 @@ bool handleComsApi(AsyncWebServerRequest* r, const String& url, WebRequestMethod
     return true;
   }
   if (url == "/api/coms/toggle") {
+    if (!comsAllowed) { sendErr(r, 409, "Meshed Comms is switched off to save memory. Turn it on in the board's settings (Memory), then restart."); return true; }
     enabled = b["on"] | false;
     cprefs.putBool("on", enabled);
     sendJson(r, 200, String("{\"enabled\":") + (enabled ? "true" : "false") + "}");

@@ -417,7 +417,7 @@ static void wxTask(void*) {
   vTaskDelete(nullptr);
 }
 void wxHistoryTick() {
-  if (!staOK || histBusy || newsBusy || time(nullptr) < 1700000000) return;   // one secure fetch at a time
+  if (!mem.wx || !staOK || histBusy || newsBusy || time(nullptr) < 1700000000) return;   // one secure fetch at a time
   wxOpen();
   if (histAt && millis() - histAt < 3600000) return;
   if (!tlsRoom("weather")) { histAt = millis() - 3300000; return; }           // try again in 5 minutes
@@ -473,7 +473,7 @@ static void newsTask(void*) {
   vTaskDelete(nullptr);
 }
 void newsTick() {
-  if (!staOK || newsBusy || histBusy || (newsAt && millis() - newsAt < 1800000)) return;   // (one secure fetch at a time)
+  if (!mem.news || !staOK || newsBusy || histBusy || (newsAt && millis() - newsAt < 1800000)) return;   // (one secure fetch at a time)
   if (!tlsRoom("news")) { newsAt = millis() - 1500000; return; }                            // try again in 5 minutes
   newsBusy = true;
   if (xTaskCreatePinnedToCore(newsTask, "news", 12288, nullptr, 1, nullptr, 1) != pdPASS) { newsBusy = false; newsAt = millis() - 1500000; }

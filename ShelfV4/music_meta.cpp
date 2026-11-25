@@ -235,18 +235,21 @@ void musicMetaLoop() {
 static void artOnlyScan() {
   mkdirs(DATA_ROOT "/album-art");
   std::vector<uint64_t> have = dirHashes(DATA_ROOT "/album-art");
-  forEachEntry("/Music", [&](const char* name, uint64_t, bool dir) {
+  for (const char* shelf : {"Music", "Opus"}) {
+  forEachEntry(String("/") + shelf, [&](const char* name, uint64_t, bool dir) {
     if (dirty) return false;                                     // new uploads: start over later
     if (musicReaders > 0 || streamsActive > 0 || ESP.getMaxAllocHeap() < 16 * 1024) { dirty = true; dirtyAt = millis() + 26000; return false; }
     String n = name;
     if (dir || !hasTagReader(n)) return true;
-    String hex = fnvHex(String("Music/") + n);
+    String hex = fnvHex(String(shelf) + "/" + n);
     if (hasHash(have, hex)) return true;
     String artist, title;
-    readTags("/Music/" + n, artist, title, String(DATA_ROOT "/album-art/") + hex + ".jpg");
+    readTags(String("/") + shelf + "/" + n, artist, title, String(DATA_ROOT "/album-art/") + hex + ".jpg");
     delay(2);
     return true;
   });
+  if (dirty) return;
+  }
 }
 
 static void musicMetaRun() {
@@ -256,10 +259,11 @@ static void musicMetaRun() {
   if (!loadJsonFile(META, meta) || !meta.is<JsonObject>()) meta.to<JsonObject>();
   mkdirs(DATA_ROOT "/album-art");
 
+  // songs on both shelves; the tag file's keys: the name for Music, "Opus/" + the name for Music (Opus)
   std::vector<std::pair<String, uint32_t>> files;
-  {
-    std::vector<DirEnt> all; listDir("/Music", all);
-    for (auto& e : all) if (!e.dir && !e.name.startsWith(".")) files.push_back({e.name, (uint32_t)e.size});
+  for (const char* shelf : {"Music", "Opus"}) {
+    std::vector<DirEnt> all; listDir(String("/") + shelf, all);
+    for (auto& e : all) if (!e.dir && !e.name.startsWith(".")) files.push_back({(shelf[0] == 'O' ? "Opus/" : "") + e.name, (uint32_t)e.size});
   }
   std::vector<String> haveArt = dirNames(DATA_ROOT "/album-art");
   bool changed = false;
@@ -280,8 +284,9 @@ static void musicMetaRun() {
     JsonVariant e = meta[f.first];
     if (!e.isNull() && (e["s"] | 0u) == f.second) continue;
     String artist, title;
-    String art = String(DATA_ROOT "/album-art/") + fnvHex(String("Music/") + f.first) + ".jpg";
-    if (hasTagReader(f.first)) readTags("/Music/" + f.first, artist, title, hasName(haveArt, art.substring(art.lastIndexOf('/') + 1)) ? String("") : art);
+    String rel = f.first.startsWith("Opus/") ? f.first : "Music/" + f.first;    // shelf/name
+    String art = String(DATA_ROOT "/album-art/") + fnvHex(rel) + ".jpg";
+    if (hasTagReader(f.first)) readTags("/" + rel, artist, title, hasName(haveArt, art.substring(art.lastIndexOf('/') + 1)) ? String("") : art);
     JsonObject o = meta[f.first].to<JsonObject>();
     o["s"] = f.second;
     if (artist.length()) o["a"] = artist;

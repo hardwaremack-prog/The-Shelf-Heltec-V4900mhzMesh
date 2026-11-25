@@ -196,7 +196,7 @@ bool handleCardApi(AsyncWebServerRequest* r, const String& url, WebRequestMethod
     size_t got = chk ? chk.size() : 0; if (chk) chk.close();
     if (!ok || got != len) { store->remove(path); sendErr(r, 500, "The card didn't save " + path); return true; }
     invalidateCounts();
-    if (path.startsWith("/Music/")) markMusicDirty();
+    if (path.startsWith("/Music/") || path.startsWith("/Opus/")) markMusicDirty();
     sendJson(r, 200, String("{\"ok\":true,\"size\":") + got + "}");
     return true;
   }

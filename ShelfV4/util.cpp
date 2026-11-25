@@ -8,7 +8,8 @@
 #include <memory>
 
 // sidebar order, as on the computer: Books / PDFs at the top, Pictures at the bottom
-const char* const CATEGORIES[NUM_CATEGORIES] = {"Books", "Music", "MIDI", "Videos", "Games", "Programs", "Pictures"};
+// "Opus" (the Music (Opus) shelf: songs shrunk to .opus) goes last, so the lock settings of the others stay put
+const char* const CATEGORIES[NUM_CATEGORIES] = {"Books", "Music", "MIDI", "Videos", "Games", "Programs", "Pictures", "Opus"};
 bool isCategory(const String& c) { for (auto x : CATEGORIES) if (c == x) return true; return false; }
 
 SpiRamAllocator psAlloc;

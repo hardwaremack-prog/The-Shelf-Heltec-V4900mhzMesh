@@ -16,7 +16,10 @@ extern uint64_t storeTotal, storeUsed;
 
 // Shelves live at the root of the card (so the card reads like a normal
 // drive in a PC). Everything else The Shelf keeps is under /.shelf.
-#define NUM_CATEGORIES 7
+#define NUM_CATEGORIES 8
+// the two shelves of songs (Music, and Music (Opus) for .opus files): artists, album art, the tag scan
+inline bool isSongShelf(const String& c) { return c == "Music" || c == "Opus"; }
+void moveOpusOffMusic();   // api_files.cpp: at start-up, .opus songs on Music go to their own shelf
 extern const char* const CATEGORIES[NUM_CATEGORIES];
 bool isCategory(const String& c);
 #define DATA_ROOT   "/.shelf/data"

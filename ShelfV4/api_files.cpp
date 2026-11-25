@@ -22,7 +22,7 @@ static String thumbPath(const char* kind, const String& cat, const String& name)
 static bool thumbable(const String& cat) { return cat == "Games" || cat == "Programs" || cat == "Books"; }
 
 // ------------------------------------------------------------ category counts (cached)
-static int counts[NUM_CATEGORIES] = {-1, -1, -1, -1, -1, -1, -1};
+static int counts[NUM_CATEGORIES] = {-1, -1, -1, -1, -1, -1, -1, -1};
 void invalidateCounts() { for (int& c : counts) c = -1; statsDirty = true; }
 int countCategory(const String& cat) {
   for (int i = 0; i < NUM_CATEGORIES; i++) if (cat == CATEGORIES[i]) {
@@ -68,8 +68,28 @@ static void migrateExtras(const String& fc, const String& fn, const String& tc, 
   }
   String cache = String(PLAY_ROOT "/") + md5hex(fc + "/" + fn);
   if (store->exists(cache)) removeAll(cache);
-  if (fc == "Music" || tc == "Music") markMusicDirty();
+  if (isSongShelf(fc) || isSongShelf(tc)) markMusicDirty();
   invalidateCounts();
+}
+
+// Songs shrunk to Opus used to sit on Music beside the MP3s: at start-up they move to the Music (Opus)
+// shelf, with their plays and album art.
+void moveOpusOffMusic() {
+  std::vector<String> names;
+  forEachEntry("/Music", [&](const char* name, uint64_t, bool dir) {
+    if (!dir) { String n = name; String e = extOf(n); e.toLowerCase(); if (e == "opus") names.push_back(n); }
+    return names.size() < 2000;
+  });
+  if (names.empty()) return;
+  mkdirs("/Opus");
+  int moved = 0;
+  for (auto& n : names) {
+    String to = uniqueName("/Opus", n);
+    if (!moveFile("/Music/" + n, "/Opus/" + to)) continue;
+    migrateExtras("Music", n, "Opus", to);
+    moved++;
+  }
+  Serial.printf("[shelf] moved %d Opus song%s from Music to the Music (Opus) shelf\n", moved, moved == 1 ? "" : "s");
 }
 
 // ------------------------------------------------------------ listing
@@ -105,11 +125,11 @@ static void entryJson(ListState& s, const DirEnt& e, String& o) {
               jsonEsc(e.name).c_str(), (unsigned long long)e.size, humanSize(e.size).c_str(),
               (unsigned long long)e.mtimeMs, (unsigned long long)e.mtimeMs, fileKind(e.name).c_str(), jsonEsc(extOf(e.name)).c_str(),
               jsonEsc(url).c_str(), pc);
-  if (cat == "Music") {
+  if (isSongShelf(cat)) {
     String art = thumbPath("album-art", cat, e.name);
     if (hasHash(s.haveArt, art.substring(art.lastIndexOf('/') + 1))) out->printf(",\"artUrl\":\"/data-files/album-art/%s?v=%llx-%x\"", art.substring(art.lastIndexOf('/') + 1).c_str(), (unsigned long long)e.mtimeMs, artGen());
     else out->print(",\"artUrl\":null");
-    const char* a = s.meta[e.name]["a"] | (const char*)nullptr;
+    const char* a = s.meta[cat == "Opus" ? "Opus/" + e.name : e.name]["a"] | (const char*)nullptr;
     if (a && *a) out->printf(",\"artist\":\"%s\"", jsonEsc(a).c_str()); else out->print(",\"artist\":null");
   }
   if (cat == "Videos" || thumbable(cat)) {
@@ -145,18 +165,18 @@ static size_t fillList(ListState& s, uint8_t* buf, size_t maxLen) {
 static void listFiles(AsyncWebServerRequest* r, const String& cat) {
   auto s = std::make_shared<ListState>();
   s->cat = cat;
-  if (cat == "Music") { musicReaders++; s->reader = true; }   // the background scan waits
+  if (isSongShelf(cat)) { musicReaders++; s->reader = true; }   // the background scan waits
   listDir(catDir(cat), s->v);
   s->v.erase(std::remove_if(s->v.begin(), s->v.end(), [](const DirEnt& e) { return e.dir || e.name.startsWith("."); }), s->v.end());
   // which songs/videos/games already have art or a thumbnail: one look at each folder
-  if (cat == "Music") s->haveArt = dirHashes(DATA_ROOT "/album-art");
+  if (isSongShelf(cat)) s->haveArt = dirHashes(DATA_ROOT "/album-art");
   if (cat == "Videos") s->haveThumb = dirHashes(DATA_ROOT "/video-thumbs");
   else if (thumbable(cat)) s->haveThumb = dirHashes(DATA_ROOT "/file-thumbs");
   std::sort(s->v.begin(), s->v.end(), [](const DirEnt& a, const DirEnt& b) { return a.mtimeMs > b.mtimeMs; });
   loadJsonFile(PLAYS_FILE, s->plays);
   // Artists from the songs' tags. Without PSRAM (a plain ESP32) the whole file doesn't fit next to
   // everything else, so the list goes without them there (most songs are named "Artist - Title").
-  if (cat == "Music" && ESP.getPsramSize() > 0) loadJsonFile(META_FILE, s->meta);
+  if (isSongShelf(cat) && ESP.getPsramSize() > 0) loadJsonFile(META_FILE, s->meta);
   AsyncWebServerResponse* res = r->beginChunkedResponse("application/json",
     [s](uint8_t* buf, size_t maxLen, size_t) -> size_t { return fillList(*s, buf, maxLen); });
   res->addHeader("Cache-Control", "no-store");
@@ -215,6 +235,10 @@ void handleUploadPart(AsyncWebServerRequest* r, const String& filename, size_t i
     } else {
       String cat = r->hasParam("category", true) ? r->getParam("category", true)->value() : "";
       if (!isCategory(cat)) { u->err = 1; return; }
+      // an .opus song headed for Music goes on the Opus shelf, an MP3 etc. dropped on Opus goes to Music
+      { String e = extOf(filename); e.toLowerCase();
+        if (cat == "Music" && e == "opus") cat = "Opus";
+        else if (cat == "Opus" && e != "opus" && fileKind(filename) == "audio") cat = "Music"; }
       strlcpy(u->cat, cat.c_str(), sizeof u->cat);
       dir = catDir(cat);
       name = uniqueName(dir, sanitizeFilename(filename));
@@ -246,7 +270,7 @@ void filesUploadDone(AsyncWebServerRequest* r) {
   if (u->err) return sendErr(r, 500, onSD ? "Writing to the microSD card failed partway. Check that the card isn't full and the wires are snug, then try again."
                                           : "Couldn't save the file -- the board's storage is full. Fit a microSD card for more room.");
   invalidateCounts();
-  if (String(u->cat) == "Music") markMusicDirty();
+  if (isSongShelf(String(u->cat))) markMusicDirty();
   sendJson(r, 200, String("{\"uploaded\":[\"") + jsonEsc(u->saved) + "\"]}");
 }
 
@@ -516,7 +540,7 @@ bool handleFilesApi(AsyncWebServerRequest* r, const String& url, WebRequestMetho
     return true;
   }
   if (action == "thumbnail") {
-    bool video = cat == "Videos", music = cat == "Music";      // Music: the song's cover art
+    bool video = cat == "Videos", music = isSongShelf(cat);    // Music: the song's cover art
     if (!video && !music && !thumbable(cat)) { sendErr(r, 400, "This shelf does not support thumbnails."); return true; }
     const char* kind = video ? "video-thumbs" : music ? "album-art" : "file-thumbs";
     String tp = thumbPath(kind, cat, safe);
@@ -535,10 +559,11 @@ bool handleFilesApi(AsyncWebServerRequest* r, const String& url, WebRequestMetho
       return true;
     }
   }
-  if (action == "tags" && m == HTTP_GET && cat == "Music") {
+  if (action == "tags" && m == HTTP_GET && isSongShelf(cat)) {
     JsonDocument meta(&psAlloc); loadJsonFile(META_FILE, meta);
-    const char* a = meta[safe]["a"] | "";
-    const char* t = meta[safe]["t"] | "";
+    String mk = cat == "Opus" ? "Opus/" + safe : safe;
+    const char* a = meta[mk]["a"] | "";
+    const char* t = meta[mk]["t"] | "";
     sendJson(r, 200, String("{\"title\":\"") + jsonEsc(t) + "\",\"artist\":\"" + jsonEsc(a) + "\",\"album\":\"\",\"year\":\"\",\"track\":\"\",\"genre\":\"\",\"readOnly\":true}");
     return true;
   }

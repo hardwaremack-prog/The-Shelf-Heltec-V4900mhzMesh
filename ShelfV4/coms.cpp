@@ -871,7 +871,7 @@ static void xferPacket(const uint8_t* b, size_t len, float rssi) {
         uint8_t p[16]; size_t n = xHead(p, T_FDONEACK); p[n++] = ok;
         xSend(p, n);
         String note = ok ? "Saved to " + X.cat : "The file didn't check out (sent again, it may work).";
-        if (ok && X.cat == "Music") markMusicDirty();
+        if (ok && isSongShelf(X.cat)) markMusicDirty();
         int keepT = X.transport; uint32_t keepX = X.xid; uint32_t linger = X.lingerUntil;
         xFinish(ok, note);                                    // (back on the mesh once lingering is over)
         if (keepT == XT_LORA) loraMode(true);

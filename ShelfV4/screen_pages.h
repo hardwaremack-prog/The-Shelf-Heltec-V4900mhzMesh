@@ -30,7 +30,7 @@ static bool nowPlayingRecent() { return npAt && millis() - npAt < 600000; }
 // Called by the web server (any task) when something is opened from a shelf: a song, a game,
 // a program, a video or a picture. Shows its name for 30 seconds, then keeps it in the rotation.
 void screenShowing(const String& cat, const String& file) {
-  bool music = cat == "Music" || cat == "MIDI";
+  bool music = cat == "Music" || cat == "Opus" || cat == "MIDI";
   const char* label = music ? "NOW PLAYING" : cat == "Games" ? "PLAYING GAME" : cat == "Programs" ? "PROGRAM"
                     : cat == "Videos" ? "WATCHING" : cat == "Pictures" ? "PICTURE" : cat == "Books" ? "READING" : cat == "Files" ? "FILE COMING IN" : nullptr;
   if (!label) return;

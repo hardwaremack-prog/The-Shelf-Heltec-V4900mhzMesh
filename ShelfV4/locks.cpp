@@ -22,7 +22,7 @@ static const char* const TOOL_IDS[] = {"notes", "documents", "sheets", "presenta
 static const char* const TOOL_LABELS[] = {"Notes", "Docs", "Sheets", "Slides", "Draw", "Messages"};
 static const int NUM_TOOLS = 6;
 
-static uint32_t lockedBits = 0;      // which areas: bit i = CATEGORIES[i], bit 7 + j = TOOL_IDS[j]
+static uint32_t lockedBits = 0;      // which areas: bit i = CATEGORIES[i], bit NUM_CATEGORIES + j = TOOL_IDS[j]
 static bool haveKey = false, enabled = true;
 static uint8_t salt[16], key[32];
 static uint32_t epoch = 1;
@@ -55,6 +55,11 @@ static void save() {
 void locksBegin() {
   lp.begin("locks", false);
   lockedBits = lp.getUInt("bits", 0); epoch = lp.getUInt("ep", 1); enabled = lp.getBool("on", true);
+  if (lp.getUChar("nshelf", 7) < NUM_CATEGORIES) {   // a shelf was added (Music (Opus)): the tools' bits move up one
+    uint32_t shelves = lockedBits & 0x7F, tools = lockedBits >> 7;
+    lockedBits = shelves | (tools << NUM_CATEGORIES);
+    lp.putUInt("bits", lockedBits); lp.putUChar("nshelf", NUM_CATEGORIES);
+  }
   haveKey = lp.getBytes("salt", salt, 16) == 16 && lp.getBytes("key", key, 32) == 32;
 }
 

@@ -298,7 +298,7 @@
   }
 
   // ---- Remote admin over 900MHz: connect to a board with its admin password ----
-  const SHELVES = ['Pictures', 'Music', 'MIDI', 'Videos', 'Games', 'Programs', 'Books'];
+  const SHELVES = ['Pictures', 'Music', 'Opus', 'MIDI', 'Videos', 'Games', 'Programs', 'Books'];
   function openRemote(dev) {
     const R = { dev, session: null, busy: null, st: null, out: '', err: '' };
     const ov = document.createElement('div');
@@ -1027,7 +1027,7 @@
 // HTML games and programs with their thumbnails), the boards this one hears, and the progress.
 (function () {
   let timer = null, cat = 'Pictures', files = [], picked = null, to = '', filter = '', lastSig = '';
-  const SHELVES = [['Pictures', '🖼️'], ['Music', '🎵'], ['MIDI', '🎹'], ['Books', '📕'], ['Games', '🎮'], ['Programs', '🧰'], ['Videos', '🎬']];
+  const SHELVES = [['Pictures', '🖼️'], ['Music', '🎵'], ['Opus', '🎶'], ['MIDI', '🎹'], ['Books', '📕'], ['Games', '🎮'], ['Programs', '🧰'], ['Videos', '🎬']];
   const ICON = f => {
     const e = (f.ext || '').toLowerCase();
     if (e === 'pdf') return '📕'; if (e === 'html' || e === 'htm') return cat === 'Games' ? '🎮' : '🌐';

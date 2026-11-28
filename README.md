@@ -15,13 +15,13 @@
 | Pictures (grid, slideshow, photo editor), Music (shuffle, play counts, artist and cover art read from your MP3s' and Opus files' own tags), **MIDI** (its own shelf: `.mid`, `.midi`, `.kar` files played by a built-in General MIDI synth, with the same player, shuffle and play counts), Videos, Games (`.html` and zipped HTML games play in the page), Programs, Books (PDF reader and cover thumbnails) | The AI assistant and Create with AI |
 | Home: bulletin board with notes, pasted pictures and videos, quick links, weather | Remote desktop (VNC) |
 | Notes, Docs, Sheets, Slides, Draw | Online album-art lookup, tag editing, Standardize names, Remove duplicates, Export |
-| Tidy Suite | Big Transfer, backup/restore zips, spreadsheet import |
+| Tidy Suite | Big Transfer (except on the V4 MMC), backup/restore zips, spreadsheet import |
 | **Messages**: finds and chats with your other Shelves (PCs, Pis, other boards), pictures included | User accounts (the board has one admin password instead) |
 | **Meshed Comms**: LoRa text mesh between boards, every board a relay, 12-hour catch-up, list of boards and remote admin | |
 | **Read-only mode** with an admin password to unlock changes | |
 | **Insane compression** (1.19): music and photos are shrunk in your browser on the way in, and the **Shrink…** button on the Music and Pictures shelves shrinks what's already there (optionally removing the originals). MP3s become Opus 48 kbps (3.8 MB → 1.4 MB, 62% smaller, tags and cover kept), photos and iPhone HEICs become AVIF at 2048 px (~3.5 MB → ~250 KB). The encoders load from the jsDelivr CDN, so the device you upload from needs the internet; otherwise files go up as they are. | |
 
-The buttons for those computer-only features are hidden on the board, and the AI and Big Transfer tabs are left out.
+The buttons for those computer-only features are hidden on the board, and the AI and Big Transfer tabs are left out (the Heltec V4 MMC keeps Big Transfer).
 
 ## Hardware
 
@@ -74,7 +74,9 @@ Lay the reader face down along J3 so **D0 · CMD · CLK · D3 · D2** drop strai
 | D1 | wire to **GPIO 4** |
 | CD | not used (snip it) |
 
-It tries 4-bit at 40 MHz, then 20 MHz, then 1-bit (D0 only) so a card still works while a D1/D2/D3 wire is checked; the serial log says which one it found. GPIO 38–42 are the GNSS connector's pins, so this build has no GPS. The card's activity flicker on the LED is the SPI library's, so it doesn't flicker on this build.
+It tries 4-bit at 40 MHz, then 20 MHz, then 1-bit (D0 only) so a card still works while a D1/D2/D3 wire is checked; the serial log says which one it found. GPIO 38–42 are the GNSS connector's pins, so this build has no GPS.
+
+**Big Transfer** is back on this build, for a big card (say 128 GB): the same tab as The Shelf on a computer, for disk images, backups and whole video projects. Files come up in 16 MB chunks; a dropped connection only costs the chunk in flight, and dropping the same file in again later picks up where it stopped. The card is FAT32 (the board's FAT driver can't read exFAT, so format a 64 GB+ card as FAT32, for example with the SD Card Formatter's FAT32 option or `guiformat`), and FAT32 stops one file at 4 GB, so the board keeps anything over 1 GB in 1 GB pieces and joins them back together as you download. On the card they're in **Big Files**: small ones as ordinary files, bigger ones as a `name.parts` folder (`000`, `001`, …) that a PC can join with `copy /b 000+001+002 name` (Windows) or `cat 0* > name`. Speed is limited by the board's Wi-Fi (about 1–3 MB/s), so a 20 GB file takes a few hours each way.
 
 ### On a Heltec V3
 
@@ -194,6 +196,19 @@ On the settings page, choose **Use its own Wi-Fi**, then pick a network name and
 If the board is set to join your home Wi-Fi but can't find it at power-up, it starts its own Wi-Fi anyway and keeps looking for home.
 
 <p align="center"><img src="docs/screenshots/settings-own-wifi.png" width="360" alt="Board settings: Use its own Wi-Fi, with network name and password"></p>
+
+### The status light
+
+The board's white LED (blue on a plain ESP32) shows what it's doing:
+
+| Light | Means |
+|---|---|
+| Slow blink | Starting up |
+| Slow, smooth fade in and out | Ready: the web page is up |
+| Quick flicker | The microSD card is being read or written |
+| Fast flash | Updating (firmware or web app being written) |
+
+It goes dark while the board is powered off to save the battery. The orange light is the battery charger's own and can't be switched.
 
 ### The screen
 

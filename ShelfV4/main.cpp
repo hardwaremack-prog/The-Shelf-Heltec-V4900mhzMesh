@@ -696,12 +696,17 @@ class ShelfHandler : public AsyncWebHandler {
   bool canHandle(AsyncWebServerRequest* r) const override {
     const String& u = r->url();
     return u.startsWith("/api/") || u.startsWith("/shared/") || u.startsWith("/play/") || u.startsWith("/data-files/") ||
-           u == "/" || u == "/index.html" || u == "/update";
+           u == "/" || u == "/index.html" || u == "/update"
+#if defined(SHELF_MMC)
+           || u.startsWith("/bigfiles-dl/")
+#endif
+           ;
   }
   bool isRequestHandlerTrivial() const override { return false; }
 
   void handleBody(AsyncWebServerRequest* r, uint8_t* data, size_t len, size_t index, size_t total) override {
     if (isOtaUpload(r->url())) { otaBody(r, data, len, index, total); return; }   // firmware updates go straight to flash
+    if (isBigChunk(r->url())) { bigBody(r, data, len, index, total); return; }    // Big Transfer chunks go straight to the card
     if (index == 0) {
       if (r->_tempObject) return;
       if (r->client() && total > 64 * 1024) r->client()->setRxTimeout(30);   // big pasted pictures / docs: don't drop on a slow card
@@ -768,7 +773,7 @@ class ShelfHandler : public AsyncWebHandler {
     }
     try {
     if (serveContent(r, url)) return;
-    bool done = handleGpsApi(r, url, m) || handleOtaApi(r, url, m) || handleBtApi(r, url, m) || handleThumbImportApi(r, url, m) || handleCardApi(r, url, m) || handleBoardApi(r, url, m) || handleComsApi(r, url, m) || handleMessagingApi(r, url, m) || handleFilesApi(r, url, m) || handleToolsApi(r, url, m);
+    bool done = handleBigfilesApi(r, url, m) || handleGpsApi(r, url, m) || handleOtaApi(r, url, m) || handleBtApi(r, url, m) || handleThumbImportApi(r, url, m) || handleCardApi(r, url, m) || handleBoardApi(r, url, m) || handleComsApi(r, url, m) || handleMessagingApi(r, url, m) || handleFilesApi(r, url, m) || handleToolsApi(r, url, m);
     if (!done) sendErr(r, 404, "Not found");
     } catch (...) {
       // out of memory part-way through (a big list on a board without PSRAM): say so, keep running

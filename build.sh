@@ -30,6 +30,7 @@ fi
 mkdir -p build docs/firmware
 python3 tools/gen_daily.py "$SHELF" ShelfV4/daily_gen.h   # the daily affirmation and color for the screen
 python3 tools/pack_www.py "$SHELF" build/www-v4.bin 0x200000 V4
+python3 tools/pack_www.py "$SHELF" build/www-v4mmc.bin 0x200000 V4MMC   # keeps Big Transfer, no GPS
 python3 tools/pack_www.py "$SHELF" build/www-v3.bin 0x200000 V3
 python3 tools/pack_www.py "$SHELF" build/www-esp32.bin 0x130000 ESP32
 
@@ -48,13 +49,17 @@ build() {   # name psram-option flash-size partitions app-size www-offset extra-
   local name=$1 psram=$2 flash=$3 parts=$4 appmax=$5 wwwoff=$6 defs=$7 cdc=$8 bd="build/$1" www="build/www-v4.bin"
   local chip=esp32s3 fqbn="espressif:esp32:esp32s3:FlashSize=$flash,FlashMode=qio,PSRAM=$psram,USBMode=hwcdc,CDCOnBoot=$cdc,CPUFreq=240" boot=0x0
   [[ "$defs" == *SHELF_V3* ]] && www="build/www-v3.bin"
+  [[ "$defs" == *SHELF_MMC* ]] && www="build/www-v4mmc.bin"
   if [[ "$defs" == *SHELF_ESP32* ]]; then   # plain ESP32: its bootloader lives at 0x1000; DIO flash is the safe choice
     www="build/www-esp32.bin" chip=esp32 boot=0x1000
     fqbn="espressif:esp32:esp32:FlashSize=$flash,FlashMode=dio,PSRAM=$psram,CPUFreq=240"
   fi
+  local ld=""   # Heltec V4 MMC: the card's sector reads/writes go through sd_mmc_activity.cpp (status light)
+  [[ "$defs" == *SHELF_MMC* ]] && ld="-Wl,--wrap=sdmmc_read_sectors -Wl,--wrap=sdmmc_write_sectors"
   cp "partitions/$parts" ShelfV4/partitions.csv
   arduino-cli compile \
     --fqbn "$fqbn" \
+    --build-property "compiler.c.elf.extra_flags=$ld" \
     --build-property "compiler.cpp.extra_flags=-DCONFIG_ASYNC_TCP_RUNNING_CORE=0 -DCONFIG_ASYNC_TCP_STACK_SIZE=16384 -DCONFIG_ASYNC_TCP_QUEUE_SIZE=256 $defs" \
     --build-property "upload.maximum_size=$appmax" \
     --library "$PWD/libraries/SD" --library "$PWD/libraries/AsyncTCP" \

@@ -204,10 +204,12 @@ static void femOn(bool on) {
   (void)on; return;                         // the V3 has no front-end module
 #endif
   pinMode(FEM_POWER, OUTPUT); pinMode(FEM_EN, OUTPUT);
-  pinMode(FEM_CPS, OUTPUT); pinMode(FEM_CTX, OUTPUT);
+  pinMode(FEM_CTX, OUTPUT);
+#if !CONFIG_SPIRAM_MODE_OCT
+  pinMode(FEM_CPS, OUTPUT); digitalWrite(FEM_CPS, LOW);   // (the V4-R8's GPIO 46 is its white LED)
+#endif
   digitalWrite(FEM_POWER, on ? HIGH : LOW);
   digitalWrite(FEM_EN, on ? HIGH : LOW);
-  digitalWrite(FEM_CPS, LOW);
   digitalWrite(FEM_CTX, LOW);
   if (on) delay(5);
 }
@@ -215,7 +217,9 @@ static void femTx(bool tx) {
 #if defined(SHELF_V3) || defined(SHELF_NO_RADIO)
   (void)tx; return;
 #endif
+#if !CONFIG_SPIRAM_MODE_OCT
   digitalWrite(FEM_CPS, tx ? HIGH : LOW);
+#endif
   digitalWrite(FEM_CTX, tx ? HIGH : LOW);
 }
 

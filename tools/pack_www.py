@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Pack The Shelf's web app (its public/ folder) into a LittleFS image for the board.
 
-    python3 tools/pack_www.py <path-to-the-shelf> <out.bin> [size] [V4|V3|ESP32]
+    python3 tools/pack_www.py <path-to-the-shelf> <out.bin> [size] [V4|V4MMC|V3|ESP32]
 
 - Uses The Shelf's own index.html, app.js, style.css, pdf.js and Tidy Suite unchanged,
   except: the AI and Big Transfer tabs are taken out (they need a computer), and
@@ -15,6 +15,9 @@ shelf = pathlib.Path(sys.argv[1]).resolve()
 out_bin = pathlib.Path(sys.argv[2]).resolve()
 size = int(sys.argv[3], 0) if len(sys.argv) > 3 else 0x200000
 board = (sys.argv[4] if len(sys.argv) > 4 else "V4").upper()
+# V4MMC: the Heltec V4 MMC build (4-bit SD/MMC card reader). It keeps the Big Transfer tab (its
+# firmware stores big files on the card in 1 GB pieces) and has no GPS (the reader has its pins).
+big_files = board == "V4MMC"
 public = shelf / "public"
 if not (public / "app.js").exists():
     sys.exit(f"Can't find The Shelf's public/app.js under {shelf}")
@@ -34,7 +37,7 @@ for src in public.rglob("*"):
 # ---- small, targeted changes to The Shelf's page
 app = (stage / "app.js").read_text(encoding="utf-8")
 before = app
-for key in ("ai", "bigfiles", "mesh"):   # (mesh: the computer's way into Coms; boards have their own tab)
+for key in (("ai", "mesh") if big_files else ("ai", "bigfiles", "mesh")):   # (mesh: the computer's way into Coms; boards have their own tab)
     app = re.sub(r"\n\s*\{ key: '%s',[^\n]*\},?" % key, "", app, count=1)
 if app == before:
     sys.exit("Couldn't find the TOOLS list in app.js -- The Shelf's layout changed; update pack_www.py")
@@ -89,7 +92,7 @@ if '<option value="MIDI">' not in html:
     html = html.replace('<option value="Music">Music</option>', '<option value="Music">Music</option>\n      <option value="MIDI">MIDI</option>', 1)
 if '<option value="MIDI">' not in html:
     sys.exit("Couldn't add MIDI to the upload shelf list in index.html")
-label = "ESP32" if board == "ESP32" else f"Heltec {board}"
+label = "ESP32" if board == "ESP32" else "Heltec V4 MMC" if big_files else f"Heltec {board}"
 html = html.replace('\n<script src="mesh-coms.js"></script>', '', 1)   # the computer's Mesh Coms (boards have Coms)
 (stage / "mesh-coms.js").unlink(missing_ok=True)
 html = html.replace("<title>The Shelf</title>", f"<title>The Shelf · {label}</title>", 1)

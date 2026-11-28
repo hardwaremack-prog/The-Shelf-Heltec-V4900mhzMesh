@@ -157,9 +157,13 @@ bool handleBtApi(AsyncWebServerRequest* r, const String& url, WebRequestMethod m
 bool isOtaUpload(const String& url);
 void otaBody(AsyncWebServerRequest* r, uint8_t* data, size_t len, size_t index, size_t total);
 bool handleOtaApi(AsyncWebServerRequest* r, const String& url, WebRequestMethod m);
+// bigfiles.cpp: Big Transfer (Heltec V4 MMC only; elsewhere these do nothing)
+bool isBigChunk(const String& url);
+void bigBody(AsyncWebServerRequest* r, uint8_t* data, size_t len, size_t index, size_t total);
+bool handleBigfilesApi(AsyncWebServerRequest* r, const String& url, WebRequestMethod m);
 bool handleThumbImportApi(AsyncWebServerRequest* r, const String& url, WebRequestMethod m);   // thumb_import.cpp
 extern volatile int otaPercent;
-void ledBegin();   // led.cpp: plain ESP32 blue LED as a status light
+void ledBegin();   // led.cpp: the board's LED as a status light (ESP32 blue, Heltec white)
 void ledWebUp();
 void ledOff();
 void comsSleep();   // coms.cpp: radios off before a deep sleep

@@ -372,7 +372,7 @@ public static class CardGrower {
                 for (int o = 0; o < cs; o += 32) {
                     if (d[o] == 0x00) { ended = true; break; }
                     if (d[o] == 0xE5 || d[o + 11] == 0x0F) continue;
-                    long cl = ((long)U16(d, o + 20) << 16) | (long)U16(d, o + 26);
+                    long cl = (long)(((uint)U16(d, o + 20) << 16) | (uint)U16(d, o + 26));
                     if (cl == 0) continue;
                     if (cl < 2 || cl >= oldN + 2 || (cl <= k + 1 && reloc[cl] == 0)) throw new IOException("A folder entry points outside the card (cluster " + cl + "). Run a disk check on it first.");
                     bool dot = d[o] == '.';
@@ -398,7 +398,7 @@ public static class CardGrower {
                 for (int o = 0; o < cs; o += 32) {
                     if (d[o] == 0x00) { ended = true; break; }
                     if (d[o] == 0xE5 || d[o + 11] == 0x0F) continue;
-                    long cl = ((long)U16(d, o + 20) << 16) | (long)U16(d, o + 26);
+                    long cl = (long)(((uint)U16(d, o + 20) << 16) | (uint)U16(d, o + 26));
                     if (cl == 0) continue;
                     long n = map(cl);
                     if (n == cl) continue;

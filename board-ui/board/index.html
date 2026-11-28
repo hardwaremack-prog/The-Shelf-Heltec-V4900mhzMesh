@@ -302,7 +302,7 @@ async function speedTest(){
     if(pipe&&pipe.on!==undefined){
       const sec=Math.max(1,pipe.ms)/1000,busy=Math.round(pipe.writeMs/Math.max(1,pipe.ms)*100);
       rows.push(['Card writer (during that test)',pipe.on
-        ?`on (${pipe.poolBlocks} buffers in ${pipe.pool==='internal'?'fast internal RAM':'PSRAM'}) · ${pipe.blocks} blocks saved · card busy ${busy}% of the time · Wi-Fi side waited ${pipe.takeWaitMs} ms for free blocks and ${pipe.finishWaitMs} ms at piece ends · queue peaked at ${pipe.maxQueued}`
+        ?`on (${pipe.poolBlocks} × ${pipe.blockKB||16} KB buffers in ${pipe.pool==='internal'?'fast internal RAM':'PSRAM'}; ${Math.round((pipe.dmaFreeAtStart||0)/1024)} KB fast RAM was free) · ${pipe.blocks} blocks saved · card busy ${busy}% of the time · Wi-Fi side waited ${pipe.takeWaitMs} ms for free blocks and ${pipe.finishWaitMs} ms at piece ends · queue peaked at ${pipe.maxQueued}`
         :`off${pipe.failed?' (no room for its buffers: '+Math.round(pipe.freePsram/1024)+' KB PSRAM free)':''} · saving went the direct way`]);show()}
   }catch(e){if(rows.length)rows[rows.length-1][1]='failed';show();msg.className='msg err';msg.textContent=e.message;btn.disabled=false;return}
   const say=[],M=b=>(b*8/1e6).toFixed(1),best=Math.max(R.in3,R.in4);

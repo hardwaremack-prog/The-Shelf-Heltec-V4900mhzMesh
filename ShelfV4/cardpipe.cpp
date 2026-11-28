@@ -16,9 +16,9 @@
 #include <freertos/queue.h>
 
 #define PIPE_BLOCKS 40                 // most blocks there can be (PSRAM pool: 40 x 16 KB = 640 KB)
-#define PIPE_FAST_MAX 12               // internal-RAM pool: up to 12 x 16 KB...
+#define PIPE_FAST_MAX 16               // internal-RAM pool: up to 16 blocks...
 #define PIPE_FAST_MIN 8                // ...and at least 8 (4 connections each filling one, plus a queue)
-#define PIPE_KEEP_FREE (48 * 1024)     // internal DMA memory left for Wi-Fi and everything else
+#define PIPE_KEEP_FREE (36 * 1024)     // internal DMA memory left for Wi-Fi and everything else
 #define PIPE_SLOTS  8                  // requests writing at once
 #define SPEED_FILE  TMP_ROOT "/speed/pipe.bin"
 
@@ -43,6 +43,8 @@ static volatile uint32_t stTakeWaitMs = 0, stFinishWaitMs = 0, stWriteMs = 0, st
 static bool pipeFailed = false;
 static bool poolFast = false;          // blocks in internal RAM: the card's DMA reads them directly
 static int poolBlocks = 0;
+static size_t blkSize = UPLOAD_BUF;    // 16 KB, or 8 KB when that's what fits in internal RAM
+static uint32_t dmaFreeAtStart = 0;
 static volatile int speedActive = 0;
 
 bool bigPipeWrite(const char* id, uint64_t off, const uint8_t* buf, size_t n);   // bigfiles.cpp
@@ -94,23 +96,30 @@ static bool pipeStart() {
   // card's DMA reads internal RAM directly, so nothing is copied through PSRAM, which the
   // Wi-Fi's own buffers also live in.
   uint8_t* fast[PIPE_FAST_MAX]; int nf = 0;
-  while (nf < PIPE_FAST_MAX && heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA) > PIPE_KEEP_FREE + UPLOAD_BUF) {
-    uint8_t* b = (uint8_t*)heap_caps_malloc(UPLOAD_BUF, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
-    if (!b) break;
-    fast[nf++] = b;
+  dmaFreeAtStart = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
+  for (size_t sz : {(size_t)UPLOAD_BUF, (size_t)(8 * 1024)}) {   // 16 KB blocks if they fit, else 8 KB
+    nf = 0;
+    while (nf < PIPE_FAST_MAX && heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA) > PIPE_KEEP_FREE + sz) {
+      uint8_t* b = (uint8_t*)heap_caps_malloc(sz, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
+      if (!b) break;
+      fast[nf++] = b;
+    }
+    if (nf >= PIPE_FAST_MIN) { blkSize = sz; break; }
+    for (int i = 0; i < nf; i++) free(fast[i]);
+    nf = 0;
   }
   if (nf >= PIPE_FAST_MIN) {
     for (int i = 0; i < nf; i++) xQueueSend(fq, &fast[i], 0);
     poolFast = true; poolBlocks = nf;
   } else {
-    for (int i = 0; i < nf; i++) free(fast[i]);
+    blkSize = UPLOAD_BUF;
     uint8_t* pool = (uint8_t*)heap_caps_malloc(PIPE_BLOCKS * UPLOAD_BUF, MALLOC_CAP_SPIRAM);
     bounce = (uint8_t*)heap_caps_malloc(UPLOAD_BUF, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
     if (!pool || !bounce) { failed = true; Serial.println("[shelf] card writer: not enough memory, writing directly"); return false; }
     for (int i = 0; i < PIPE_BLOCKS; i++) { uint8_t* b = pool + i * UPLOAD_BUF; xQueueSend(fq, &b, 0); }
     poolFast = false; poolBlocks = PIPE_BLOCKS;
   }
-  Serial.printf("[shelf] card writer: %d x 16 KB blocks in %s\n", poolBlocks, poolFast ? "internal RAM" : "PSRAM");
+  Serial.printf("[shelf] card writer: %d x %u KB blocks in %s\n", poolBlocks, (unsigned)(blkSize / 1024), poolFast ? "internal RAM" : "PSRAM");
   freeQ = fq; jobQ = jq;
   xTaskCreatePinnedToCore(writerTask, "cardwriter", 10240, nullptr, 3, nullptr, 1);   // network is on core 0
   return true;
@@ -165,12 +174,12 @@ bool pipeFeed(int slot, const uint8_t* data, size_t len) {
   if (s.err) return false;
   while (len) {
     if (!takeBlock(s)) { s.err = true; return false; }
-    size_t n = std::min(len, (size_t)UPLOAD_BUF - s.fill);
+    size_t n = std::min(len, blkSize - s.fill);
     memcpy(s.blk + s.fill, data, n); s.fill += n; data += n; len -= n;
-    if (s.fill == UPLOAD_BUF) {
+    if (s.fill == blkSize) {
       uint8_t* b = s.blk; s.blk = nullptr;
-      if (!enqueue(slot, s.target == PIPE_BIG ? J_BIG : J_SPEED, s.pos, b, UPLOAD_BUF)) { s.err = true; return false; }
-      s.pos += UPLOAD_BUF;
+      if (!enqueue(slot, s.target == PIPE_BIG ? J_BIG : J_SPEED, s.pos, b, blkSize)) { s.err = true; return false; }
+      s.pos += blkSize;
     }
   }
   return true;
@@ -214,7 +223,8 @@ String pipeStatsJson() {
   return String("{\"on\":") + (jobQ ? "true" : "false") + ",\"failed\":" + (pipeFailed ? "true" : "false") +
          ",\"blocks\":" + stBlocks + ",\"writeMs\":" + stWriteMs + ",\"takeWaitMs\":" + stTakeWaitMs +
          ",\"finishWaitMs\":" + stFinishWaitMs + ",\"maxQueued\":" + stMaxQueued + ",\"ms\":" + (millis() - stT0) +
-         ",\"pool\":\"" + (poolFast ? "internal" : "psram") + "\",\"poolBlocks\":" + poolBlocks +
+         ",\"pool\":\"" + (poolFast ? "internal" : "psram") + "\",\"poolBlocks\":" + poolBlocks + ",\"blockKB\":" + (blkSize / 1024) +
+         ",\"dmaFreeAtStart\":" + dmaFreeAtStart +
          ",\"freePsram\":" + ESP.getFreePsram() + ",\"freeDma\":" + heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA) + "}";
 }
 #else

@@ -79,6 +79,72 @@ if 'isMusicShelf' not in app:          # The Shelf has had the MIDI shelf built 
 app, nimg = re.subn(r'<img src="(\$\{f\.(?:url|artUrl|thumbUrl)\})"( alt="[^"]*")? loading="lazy">', r'<img data-qsrc="\1"\2>', app)
 if not nimg:
     print("note: no shelf images found to queue (The Shelf's layout changed?)")
+# V4 MMC Big Transfer: 1 MB chunks (the board collects each one in PSRAM before writing it), a
+# progress bar that moves while a chunk is going (not just after it), and the speed and time left.
+if big_files:
+    reps = [
+        ("const BIGFILE_CHUNK_SIZE = 16 * 1024 * 1024;", "const BIGFILE_CHUNK_SIZE = 1024 * 1024;   // the board takes 1 MB at a time"),
+        ("""      const res = await fetch(`/api/bigfiles/${u.uploadId}/chunk?offset=${u.uploadedBytes}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: chunk,
+      });""", """      const res = await bigChunkXhr(`/api/bigfiles/${u.uploadId}/chunk?offset=${u.uploadedBytes}`, chunk, u);"""),
+        ("""  const pct = u.size ? Math.round((u.uploadedBytes / u.size) * 100) : 0;
+  const label = u.status === 'error'""", """  const live = Math.min(u.size || 0, u.uploadedBytes + (u.status === 'uploading' ? (u.liveBytes || 0) : 0));
+  const pct = u.size ? Math.floor((live / u.size) * 1000) / 10 : 0;
+  const label = u.status === 'error'"""),
+        (""": `${humanFileSize(u.uploadedBytes)} of ${humanFileSize(u.size)} (${pct}%)`;""",
+         """: `${humanFileSize(live)} of ${humanFileSize(u.size)} (${pct}%)${bigSpeedText(u, live)}`;"""),
+    ]
+    for a, b in reps:
+        if a not in app:
+            sys.exit("pack_www: Big Transfer code in app.js changed -- update the V4MMC patches (" + a[:50] + "...)")
+        app = app.replace(a, b, 1)
+    app += r"""
+
+// ---- Heltec V4 MMC: Big Transfer progress while a chunk is on its way, with speed and time left
+function bigChunkXhr(url, blob, u) {
+  return new Promise((resolve, reject) => {
+    const x = new XMLHttpRequest();
+    x.open('POST', url);
+    x.setRequestHeader('Content-Type', 'application/octet-stream');
+    let last = 0;
+    x.upload.onprogress = (e) => {
+      u.liveBytes = e.loaded;
+      bigSpeedSample(u, u.uploadedBytes + e.loaded);
+      const now = performance.now();
+      if (now - last > 250) { last = now; renderBigfileUploadCard(); }
+    };
+    x.onload = () => {
+      u.liveBytes = 0;
+      let body = {};
+      try { body = JSON.parse(x.responseText || '{}'); } catch { /* not JSON */ }
+      if (typeof body.receivedBytes === 'number') bigSpeedSample(u, body.receivedBytes);
+      resolve({ ok: x.status >= 200 && x.status < 300, status: x.status, json: async () => body });
+    };
+    x.onerror = () => { u.liveBytes = 0; reject(new Error('The connection dropped.')); };
+    x.onabort = () => { u.liveBytes = 0; reject(new Error('The upload was stopped.')); };
+    x.send(blob);
+  });
+}
+// keeps the last ~8 seconds of (time, bytes) to work out a steady speed
+function bigSpeedSample(u, bytes) {
+  const now = performance.now();
+  const s = u.speedSamples || (u.speedSamples = []);
+  s.push([now, bytes]);
+  while (s.length > 2 && now - s[0][0] > 8000) s.shift();
+}
+function bigSpeedText(u, live) {
+  if (u.status !== 'uploading') return '';
+  const s = u.speedSamples || [];
+  if (s.length < 2) return ' · measuring speed…';
+  const dt = (s[s.length - 1][0] - s[0][0]) / 1000, db = s[s.length - 1][1] - s[0][1];
+  if (dt < 1 || db <= 0) return ' · measuring speed…';
+  const bps = db / dt;
+  const left = Math.max(0, (u.size - live) / bps);
+  const t = left >= 3600 ? `${Math.floor(left / 3600)} h ${Math.round((left % 3600) / 60)} min`
+          : left >= 60 ? `${Math.round(left / 60)} min` : `${Math.round(left)} s`;
+  return ` · ${humanFileSize(bps)}/s (${(bps * 8 / 1e6).toFixed(1)} Mbps) · about ${t} left`;
+}
+"""
 (stage / "app.js").write_text(app, encoding="utf-8")
 if "\x01" in app or "\x02" in app:
     sys.exit("app.js picked up a stray control character from a replacement -- check pack_www.py's regexes")

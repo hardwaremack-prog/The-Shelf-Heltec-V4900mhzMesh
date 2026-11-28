@@ -108,6 +108,10 @@ struct UploadCtx {           // multipart uploads (also freed with free())
   uint8_t buf[1];            // UPLOAD_BUF bytes (flexible size, same block)
 };
 #define UPLOAD_BUF (16 * 1024)
+// Buffers whose contents get written to the card. On the V4 MMC they're kept in internal RAM:
+// the SD/MMC host's DMA can't read PSRAM (where big mallocs land), and from PSRAM the driver
+// writes one 512-byte sector at a time, which is far slower.
+void* cardBufAlloc(size_t n);
 // Writes one block to a file being saved and makes it stick; if the card refuses it, reopens
 // the file and writes the block again where it belongs (up to 3 more times).
 bool writeBlockRetry(File& f, const char* path, const uint8_t* buf, size_t n, uint32_t& synced);

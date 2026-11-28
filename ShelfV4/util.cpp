@@ -643,6 +643,14 @@ bool hasHash(const std::vector<uint64_t>& h, const String& hex16) { return std::
 
 // ------------------------------------------------------------ careful block writes
 volatile uint32_t sdRetries = 0, sdFailures = 0;
+void* cardBufAlloc(size_t n) {
+#if defined(SHELF_MMC)
+  void* p = heap_caps_malloc(n, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
+  if (p) return p;
+#endif
+  return malloc(n);
+}
+
 bool writeBlockRetry(File& f, const char* path, const uint8_t* buf, size_t n, uint32_t& synced) {
   if (!n) return true;
   for (int t = 0; t < 4; t++) {

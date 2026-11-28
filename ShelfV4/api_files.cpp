@@ -211,7 +211,8 @@ void handleUploadPart(AsyncWebServerRequest* r, const String& filename, size_t i
   UploadCtx* u = uploadOf(r);
   if (!u) {
     if (r->_tempObject) return;
-    u = (UploadCtx*)calloc(1, sizeof(UploadCtx) + UPLOAD_BUF);
+    u = (UploadCtx*)cardBufAlloc(sizeof(UploadCtx) + UPLOAD_BUF);
+    if (u) memset(u, 0, sizeof(UploadCtx));
     if (!u) return;
     u->magic = UPLOAD_MAGIC;
     u->media = r->url() == "/api/portal/posts/media";

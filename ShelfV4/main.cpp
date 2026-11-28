@@ -711,7 +711,7 @@ class ShelfHandler : public AsyncWebHandler {
       if (r->_tempObject) return;
       if (r->client() && total > 64 * 1024) r->client()->setRxTimeout(30);   // big pasted pictures / docs: don't drop on a slow card
       bool ram = total <= BODY_RAM_MAX;
-      Body* b = (Body*)malloc(sizeof(Body) + (ram ? total : UPLOAD_BUF));
+      Body* b = (Body*)(ram ? malloc(sizeof(Body) + total) : cardBufAlloc(sizeof(Body) + UPLOAD_BUF));
       if (!b) return;
       memset(b, 0, sizeof(Body));
       b->magic = BODY_MAGIC; b->len = total; b->tooBig = total > BODY_MAX && !isCardFileUpload(r->url());   // card restores can be big

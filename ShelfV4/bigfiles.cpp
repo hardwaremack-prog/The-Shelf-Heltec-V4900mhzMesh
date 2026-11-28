@@ -11,6 +11,7 @@
 //                                     "copy /b 000+001+002 name" or "cat 0* > name")
 //   /.shelf/big/<id>/info.json, 000…  uploads still coming in
 #include "shelf.h"
+#include <esp_heap_caps.h>
 
 #if defined(SHELF_MMC)
 #define BIG_ROOT   "/Big Files"
@@ -18,17 +19,28 @@
 #define BIG_PART   (1024ULL * 1024ULL * 1024ULL)     // 1 GB pieces: well inside FAT32's 4 GB
 #define BIG_MAGIC  0x53484247u
 
-struct BigCtx {               // one chunk being written (malloc'd; the request frees it with free())
+struct BigCtx {               // one chunk being written (internal, DMA-capable RAM; the request frees it with free())
   uint32_t magic;
   int code;                   // 0 fine so far; else the HTTP error to answer with
   uint32_t part;              // which piece is being written
   uint32_t synced;            // bytes of that piece safely on the card
   uint64_t received;          // whole upload, before this chunk
-  size_t fill;                // bytes waiting in buf
+  size_t fill;                // streaming: bytes waiting in buf
+  bool inRam;                 // the chunk is collected in PSRAM first (see bigRam)
   char path[64];              // the piece's path
   char dir[40];
-  uint8_t buf[UPLOAD_BUF];
+  alignas(4) uint8_t buf[UPLOAD_BUF];
 };
+
+// A whole chunk is collected in PSRAM while it arrives, so the card never holds up the Wi-Fi
+// (the network stack's receive window is small: every pause in reading the socket slows the
+// sender down), then goes to the card in big writes with one flush. The card's DMA can't read
+// PSRAM, so the writes go through the chunk's own 16 KB of internal RAM. One chunk at a time;
+// a second upload alongside streams straight to the card instead.
+#define BIG_RAM (1024 * 1024)         // the page sends 1 MB chunks to this board
+static uint8_t* bigRam = nullptr;
+static void* bigRamOwner = nullptr;
+static uint32_t bigRamAt = 0;
 
 static BigCtx* bigCtx(AsyncWebServerRequest* r) {
   BigCtx* c = (BigCtx*)r->_tempObject;
@@ -78,18 +90,35 @@ static bool openPart(AsyncWebServerRequest* r, BigCtx* c, uint64_t already) {
   c->synced = (uint32_t)already;
   return (bool)r->_tempFile;
 }
-static bool flushChunk(AsyncWebServerRequest* r, BigCtx* c) {
-  if (!c->fill) return true;
-  bool ok = writeBlockRetry(r->_tempFile, c->path, c->buf, c->fill, c->synced);
-  c->fill = 0;
+// Writes n bytes (never past the end of the current piece) without flushing; a refused write
+// is done again from where the card last had it right (writeBlockRetry reopens and seeks).
+static bool writeSlice(AsyncWebServerRequest* r, BigCtx* c, const uint8_t* src, size_t n) {
+  if (src != c->buf) memcpy(c->buf, src, n);
+  if (r->_tempFile && r->_tempFile.write(c->buf, n) == n) { c->synced += n; return true; }
+  r->_tempFile.close();
+  return writeBlockRetry(r->_tempFile, c->path, c->buf, n, c->synced);
+}
+static bool nextPartIfFull(AsyncWebServerRequest* r, BigCtx* c) {
+  if ((uint64_t)c->synced < BIG_PART) return true;
+  r->_tempFile.flush(); r->_tempFile.close();
+  c->part++;
+  return openPart(r, c, 0);
+}
+static bool finishChunk(AsyncWebServerRequest* r, BigCtx* c) {
+  if (!r->_tempFile) return false;
+  r->_tempFile.flush();
+  bool ok = r->_tempFile.position() == c->synced;
+  r->_tempFile.close();
+  statsDirty = true;
   return ok;
 }
 
-// The chunk's bytes, as they arrive: straight onto the card, 16 KB at a time.
+// The chunk's bytes, as they arrive.
 void bigBody(AsyncWebServerRequest* r, uint8_t* data, size_t len, size_t index, size_t total) {
   if (index == 0) {
     if (r->_tempObject) return;
-    BigCtx* c = (BigCtx*)malloc(sizeof(BigCtx));
+    BigCtx* c = (BigCtx*)heap_caps_malloc(sizeof(BigCtx), MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
+    if (!c) c = (BigCtx*)malloc(sizeof(BigCtx));
     if (!c) return;
     memset(c, 0, offsetof(BigCtx, buf));
     c->magic = BIG_MAGIC;
@@ -113,29 +142,48 @@ void bigBody(AsyncWebServerRequest* r, uint8_t* data, size_t len, size_t index, 
     c->part = p.count ? p.count - 1 : 0;
     if (inLast >= BIG_PART) { c->part++; inLast = 0; }
     if (!openPart(r, c, inLast)) { c->code = 500; return; }
+    // the PSRAM buffer: free, or left behind by a chunk whose connection dropped half a minute ago
+    if (total <= BIG_RAM && (!bigRamOwner || millis() - bigRamAt > 30000)) {
+      if (!bigRam) bigRam = (uint8_t*)heap_caps_malloc(BIG_RAM, MALLOC_CAP_SPIRAM);
+      if (bigRam) { bigRamOwner = c; bigRamAt = millis(); c->inRam = true; }
+    }
   }
   BigCtx* c = bigCtx(r);
   if (!c || c->code) return;
-  size_t n0 = len;
+  if (c->inRam) {
+    if (bigRamOwner != c) { c->code = 500; return; }       // (taken over after a 30 s stall)
+    if (index + len <= BIG_RAM) memcpy(bigRam + index, data, len);
+    bigRamAt = millis();
+    if (index + len < total) return;
+    const uint8_t* src = bigRam; size_t left = total;      // all here: onto the card
+    bool ok = true;
+    while (ok && left) {
+      ok = nextPartIfFull(r, c);
+      if (!ok) break;
+      size_t n = std::min(left, (size_t)UPLOAD_BUF);
+      if ((uint64_t)n > BIG_PART - c->synced) n = (size_t)(BIG_PART - c->synced);
+      ok = writeSlice(r, c, src, n); src += n; left -= n;
+    }
+    bigRamOwner = nullptr;
+    if (!ok || !finishChunk(r, c)) c->code = 500;
+    return;
+  }
+  size_t n0 = len;                                           // streaming: 16 KB at a time
   while (len) {
     uint64_t partRoom = BIG_PART - c->synced - c->fill;
     size_t n = std::min(len, (size_t)UPLOAD_BUF - c->fill);
     if ((uint64_t)n > partRoom) n = (size_t)partRoom;
     memcpy(c->buf + c->fill, data, n); c->fill += n; data += n; len -= n;
-    bool partFull = (uint64_t)c->synced + c->fill >= BIG_PART;
-    if (c->fill == UPLOAD_BUF || partFull) {
-      if (!flushChunk(r, c)) { c->code = 500; r->_tempFile.close(); return; }
-      if (partFull) {                                     // this piece is full: on to the next one
-        r->_tempFile.close();
-        c->part++;
-        if (!openPart(r, c, 0)) { c->code = 500; return; }
-      }
+    if (c->fill == UPLOAD_BUF || (uint64_t)c->synced + c->fill >= BIG_PART) {
+      bool ok = writeSlice(r, c, c->buf, c->fill);
+      c->fill = 0;
+      if (!ok || !nextPartIfFull(r, c)) { c->code = 500; r->_tempFile.close(); return; }
     }
   }
   if (index + n0 >= total) {
-    if (!flushChunk(r, c)) c->code = 500;
-    r->_tempFile.close();
-    statsDirty = true;
+    bool ok = !c->fill || writeSlice(r, c, c->buf, c->fill);
+    c->fill = 0;
+    if (!ok || !finishChunk(r, c)) c->code = 500;
   }
 }
 

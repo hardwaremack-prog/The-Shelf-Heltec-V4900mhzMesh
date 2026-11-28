@@ -19,7 +19,8 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
-Add-Type -TypeDefinition @'
+try {
+Add-Type -ErrorAction Stop -TypeDefinition @'
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -348,16 +349,17 @@ public static class CardGrower {
         }
         say("Reading the folders...");
         List<List<long>> dirs = new List<List<long>>();                         // each folder's clusters, in order
-        HashSet<long> seenDir = new HashSet<long>();
+        Dictionary<long, bool> seenDir = new Dictionary<long, bool>();
         Queue<long> todo = new Queue<long>();
         todo.Enqueue(root);
         while (todo.Count > 0) {
             long first = todo.Dequeue();
-            if (first < 2 || first >= oldN + 2 || !seenDir.Add(first)) continue;
+            if (first < 2 || first >= oldN + 2 || seenDir.ContainsKey(first)) continue;
+            seenDir[first] = true;
             List<long> chain = new List<long>();
-            HashSet<long> inChain = new HashSet<long>();
-            for (long c = first; c >= 2 && c < oldN + 2 && inChain.Add(c); ) {
-                chain.Add(c);
+            Dictionary<long, bool> inChain = new Dictionary<long, bool>();
+            for (long c = first; c >= 2 && c < oldN + 2 && !inChain.ContainsKey(c); ) {
+                inChain[c] = true; chain.Add(c);
                 uint v = fat[c];
                 if (v == 0 || v >= EOC_MIN || v == BAD) break;
                 c = v;
@@ -456,6 +458,10 @@ public static class CardGrower {
     }
 }
 '@
+} catch {
+    [void][System.Windows.Forms.MessageBox]::Show("SD Card Imager couldn't start: $($_.Exception.Message)", 'SD Card Imager')
+    exit
+}
 
 $CHUNK = 4MB      # a multiple of every card's sector size
 

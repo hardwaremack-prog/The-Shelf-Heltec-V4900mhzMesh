@@ -71,6 +71,11 @@ label.l{font-size:13px;color:var(--muted)}
 
   <h2>This board</h2>
   <div class="card" id="info"><div class="empty">Loading&hellip;</div></div>
+  <h2>Speed test</h2>
+  <p class="tip">Finds what sets the speed of a big upload: the Wi-Fi or the microSD card. It sends test data to the board and back (about 30&nbsp;MB, a minute or so) and tests the card on its own. Nothing is kept.</p>
+  <div class="card" id="speedRes" style="display:none"></div>
+  <div class="btns"><button class="pri" id="speedBtn" onclick="speedTest()">Run speed test</button></div>
+  <div class="msg" id="speedMsg"></div>
 
   <h2>Admin password &amp; read-only</h2>
   <div class="card" id="adm"><div class="empty">Loading&hellip;</div></div>
@@ -266,6 +271,36 @@ function memRender(){if(I.board!=='ESP32'||!I.mem)return;$('#memSec').style.disp
 async function memSave(){const d={};document.querySelectorAll('#memList input').forEach(c=>d[c.dataset.k]=c.checked);
   try{await post('/api/board/memory',d);$('#memMsg').className='msg';$('#memMsg').textContent='Saved. Restarting…';$('#memSaveBtn').disabled=true;await post('/api/board/reboot',{}).catch(()=>{});memDirty=false;setTimeout(load,12000)}
   catch(e){$('#memMsg').textContent=e.message;$('#memMsg').className='msg err'}}
+async function speedTest(){
+  const btn=$('#speedBtn'),box=$('#speedRes'),msg=$('#speedMsg');btn.disabled=true;box.style.display='block';msg.textContent='';msg.className='msg';
+  const rows=[],show=()=>box.innerHTML=rows.map(r=>`<div class="kv"><span>${r[0]}</span><span>${r[1]}</span></div>`).join('');
+  const MB=1048576,fmtR=bps=>(bps*8/1e6).toFixed(1)+' Mbps ('+(bps/MB).toFixed(2)+' MB/s)';
+  const data=new Uint8Array(MB);for(let i=0;i<MB;i++)data[i]=(i*13)&255;const blob=new Blob([data]);
+  const card=I.storage==='microSD card';
+  const up=async(lanes,save,pieces)=>{let next=0,bytes=0;const t0=performance.now();
+    const lane=async()=>{while(next<pieces){next++;const r=await fetch('/api/board/speedtest/up?save='+(save?1:0),{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:blob});
+      const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||'The board said no ('+r.status+')');bytes+=MB}};
+    await Promise.all(Array.from({length:lanes},lane));return bytes/((performance.now()-t0)/1000)};
+  const down=async()=>{const t0=performance.now();const r=await fetch('/api/board/speedtest/down?bytes='+6*MB,{cache:'no-store'});if(!r.ok)throw new Error('The board said no ('+r.status+')');
+    const b=await r.arrayBuffer();return b.byteLength/((performance.now()-t0)/1000)};
+  const R={};
+  const tests=[['in1','Wi-Fi to board, 1 connection',()=>up(1,false,6)],['in3','Wi-Fi to board, 3 at once',()=>up(3,false,6)]];
+  if(card)tests.push(['save3','Wi-Fi to board + saving to card, 3 at once',()=>up(3,true,6)]);
+  tests.push(['out','Board to Wi-Fi (downloads)',down]);
+  let cardRes=null;
+  try{
+    for(const [k,name,fn] of tests){rows.push([name,'testing&hellip;']);show();R[k]=await fn();rows[rows.length-1][1]=fmtR(R[k]);show()}
+    if(card){rows.push(['Card on its own','testing&hellip;']);show();
+      const r=await fetch('/api/board/speedtest/card',{cache:'no-store'});const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||'Card test failed');
+      cardRes=j;const w=j.bytes/Math.max(1,j.writeMs)*1000,rd=j.bytes/Math.max(1,j.readMs)*1000;
+      rows[rows.length-1][1]='saves '+(w/MB).toFixed(1)+' MB/s · reads '+(rd/MB).toFixed(1)+' MB/s';show();R.cardW=w}
+  }catch(e){if(rows.length)rows[rows.length-1][1]='failed';show();msg.className='msg err';msg.textContent=e.message;btn.disabled=false;return}
+  const say=[];
+  if(R.in3>R.in1*1.25)say.push('More connections help, so Big Transfer sending several pieces at once is worth it.');
+  else say.push('More connections don\'t help: the Wi-Fi itself tops out around '+(R.in1*8/1e6).toFixed(0)+' Mbps here.');
+  if(R.save3){if(R.save3<R.in3*0.8)say.push('Saving to the card slows uploads down ('+(R.save3*8/1e6).toFixed(1)+' vs '+(R.in3*8/1e6).toFixed(1)+' Mbps without it).');
+    else say.push('The card keeps up: it saves far faster than the Wi-Fi brings data in, so the Wi-Fi sets the speed.')}
+  msg.textContent=say.join(' ');btn.disabled=false}
 async function post(u,d){const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d||{})});let j={};try{j=await r.json()}catch(e){}if(!r.ok)throw new Error(j.error||'Something went wrong');return j}
 async function load(){try{I=await fetch('/api/board/info').then(r=>r.json())}catch(e){return}
   if(I.storage==='microSD card')$('#cardSec').style.display='block';

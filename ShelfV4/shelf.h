@@ -161,6 +161,10 @@ bool handleBtApi(AsyncWebServerRequest* r, const String& url, WebRequestMethod m
 bool isOtaUpload(const String& url);
 void otaBody(AsyncWebServerRequest* r, uint8_t* data, size_t len, size_t index, size_t total);
 bool handleOtaApi(AsyncWebServerRequest* r, const String& url, WebRequestMethod m);
+// speedtest.cpp: the settings page's speed test (Wi-Fi in and out, and the card on its own)
+bool isSpeedUpload(const String& url);
+void speedBody(AsyncWebServerRequest* r, uint8_t* data, size_t len, size_t index, size_t total);
+bool handleSpeedTestApi(AsyncWebServerRequest* r, const String& url, WebRequestMethod m);
 // bigfiles.cpp: Big Transfer (Heltec V4 MMC only; elsewhere these do nothing)
 bool isBigChunk(const String& url);
 void bigBody(AsyncWebServerRequest* r, uint8_t* data, size_t len, size_t index, size_t total);

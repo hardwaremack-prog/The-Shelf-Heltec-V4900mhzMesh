@@ -647,6 +647,7 @@ void* cardBufAlloc(size_t n) {
 #if defined(SHELF_MMC)
   void* p = heap_caps_malloc(n, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
   if (p) return p;
+  if (pipeTrim()) { p = heap_caps_malloc(n, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA); if (p) return p; }   // the card writer was holding it
 #endif
   return malloc(n);
 }

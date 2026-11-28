@@ -50,10 +50,11 @@ static volatile int speedActive = 0;
 bool bigPipeWrite(const char* id, uint64_t off, const uint8_t* buf, size_t n);   // bigfiles.cpp
 bool bigPipeMark(const char* id, uint64_t off);
 
+bool pipeTrim();
 static void writerTask(void*) {
   Job j;
   for (;;) {
-    if (xQueueReceive(jobQ, &j, portMAX_DELAY) != pdTRUE) continue;
+    if (xQueueReceive(jobQ, &j, pdMS_TO_TICKS(20000)) != pdTRUE) { pipeTrim(); continue; }   // idle: give the RAM back
     Slot& s = slots[j.slot];
     bool ok = true;
     switch (j.kind) {
@@ -85,16 +86,15 @@ static void writerTask(void*) {
   }
 }
 
-static bool pipeStart() {
-  if (jobQ) return true;
-  bool& failed = pipeFailed;
-  if (failed) return false;
-  QueueHandle_t fq = xQueueCreate(PIPE_BLOCKS, sizeof(uint8_t*));
-  QueueHandle_t jq = xQueueCreate(PIPE_BLOCKS + PIPE_SLOTS * 2 + 4, sizeof(Job));
-  if (!fq || !jq) { failed = true; return false; }
-  // First choice: a few blocks in internal RAM. The writer peaks at ~4 queued blocks, and the
-  // card's DMA reads internal RAM directly, so nothing is copied through PSRAM, which the
-  // Wi-Fi's own buffers also live in.
+// The block pool. Internal-RAM blocks are only held while there's saving to do: they're
+// handed back after 20 s idle (or at once when something else needs internal RAM), since
+// holding 128 KB of it for good starves uploads to the shelves, the card test and the Wi-Fi.
+static SemaphoreHandle_t poolMux = nullptr;
+static bool poolReady = false;
+static uint8_t* psPool = nullptr;      // PSRAM fallback, kept once made (there's plenty)
+
+static bool poolFill() {               // with poolMux held, and no blocks out
+  if (poolReady) return true;
   uint8_t* fast[PIPE_FAST_MAX]; int nf = 0;
   dmaFreeAtStart = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
   for (size_t sz : {(size_t)UPLOAD_BUF, (size_t)(8 * 1024)}) {   // 16 KB blocks if they fit, else 8 KB
@@ -108,19 +108,46 @@ static bool pipeStart() {
     for (int i = 0; i < nf; i++) free(fast[i]);
     nf = 0;
   }
+  xQueueReset(freeQ);
   if (nf >= PIPE_FAST_MIN) {
-    for (int i = 0; i < nf; i++) xQueueSend(fq, &fast[i], 0);
+    for (int i = 0; i < nf; i++) xQueueSend(freeQ, &fast[i], 0);
     poolFast = true; poolBlocks = nf;
   } else {
     blkSize = UPLOAD_BUF;
-    uint8_t* pool = (uint8_t*)heap_caps_malloc(PIPE_BLOCKS * UPLOAD_BUF, MALLOC_CAP_SPIRAM);
-    bounce = (uint8_t*)heap_caps_malloc(UPLOAD_BUF, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
-    if (!pool || !bounce) { failed = true; Serial.println("[shelf] card writer: not enough memory, writing directly"); return false; }
-    for (int i = 0; i < PIPE_BLOCKS; i++) { uint8_t* b = pool + i * UPLOAD_BUF; xQueueSend(fq, &b, 0); }
+    if (!psPool) psPool = (uint8_t*)heap_caps_malloc(PIPE_BLOCKS * UPLOAD_BUF, MALLOC_CAP_SPIRAM);
+    if (!bounce) bounce = (uint8_t*)heap_caps_malloc(UPLOAD_BUF, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
+    if (!psPool || !bounce) { Serial.println("[shelf] card writer: not enough memory, writing directly"); return false; }
+    for (int i = 0; i < PIPE_BLOCKS; i++) { uint8_t* b = psPool + i * UPLOAD_BUF; xQueueSend(freeQ, &b, 0); }
     poolFast = false; poolBlocks = PIPE_BLOCKS;
   }
+  poolReady = true;
   Serial.printf("[shelf] card writer: %d x %u KB blocks in %s\n", poolBlocks, (unsigned)(blkSize / 1024), poolFast ? "internal RAM" : "PSRAM");
-  freeQ = fq; jobQ = jq;
+  return true;
+}
+
+// Hands the internal-RAM blocks back if nothing is being saved. True if it freed anything.
+bool pipeTrim() {
+  if (!poolMux) return false;
+  xSemaphoreTake(poolMux, portMAX_DELAY);
+  bool idle = poolReady && poolFast && uxQueueMessagesWaiting(jobQ) == 0 && (int)uxQueueMessagesWaiting(freeQ) == poolBlocks;
+  for (int i = 0; idle && i < PIPE_SLOTS; i++) if (slots[i].used) idle = false;
+  if (idle) {
+    uint8_t* b;
+    while (xQueueReceive(freeQ, &b, 0) == pdTRUE) free(b);
+    poolReady = false; poolBlocks = 0;
+  }
+  xSemaphoreGive(poolMux);
+  return idle;
+}
+
+static bool pipeStart() {              // the queues and the writer task, once
+  if (jobQ) return true;
+  if (pipeFailed) return false;
+  QueueHandle_t fq = xQueueCreate(PIPE_BLOCKS, sizeof(uint8_t*));
+  QueueHandle_t jq = xQueueCreate(PIPE_BLOCKS + PIPE_SLOTS * 2 + 4, sizeof(Job));
+  SemaphoreHandle_t mx = xSemaphoreCreateMutex();
+  if (!fq || !jq || !mx) { pipeFailed = true; return false; }
+  freeQ = fq; poolMux = mx; jobQ = jq;
   xTaskCreatePinnedToCore(writerTask, "cardwriter", 10240, nullptr, 3, nullptr, 1);   // network is on core 0
   return true;
 }
@@ -148,6 +175,11 @@ static bool takeBlock(Slot& s) {
 
 int pipeOpen(uint8_t target, const char* id, uint64_t off) {
   if (!pipeStart()) return -1;
+  xSemaphoreTake(poolMux, portMAX_DELAY);
+  int got = -1;
+  bool anyUsed = false;
+  for (int i = 0; i < PIPE_SLOTS; i++) if (slots[i].used) anyUsed = true;
+  if (!poolReady && (anyUsed || !poolFill())) { xSemaphoreGive(poolMux); return -1; }
   uint32_t now = millis();
   for (int i = 0; i < PIPE_SLOTS; i++) {           // a slot left by a request whose connection died
     Slot& s = slots[i];
@@ -163,9 +195,11 @@ int pipeOpen(uint8_t target, const char* id, uint64_t off) {
     s.used = true; s.target = target; s.pos = off; s.blk = nullptr; s.fill = 0; s.pending = 0; s.err = false; s.last = now;
     strlcpy(s.id, id ? id : "", sizeof s.id);
     if (target == PIPE_SPEED) __atomic_add_fetch(&speedActive, 1, __ATOMIC_SEQ_CST);
-    return i;
+    got = i;
+    break;
   }
-  return -1;
+  xSemaphoreGive(poolMux);
+  return got;
 }
 
 bool pipeFeed(int slot, const uint8_t* data, size_t len) {
@@ -228,6 +262,7 @@ String pipeStatsJson() {
          ",\"freePsram\":" + ESP.getFreePsram() + ",\"freeDma\":" + heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA) + "}";
 }
 #else
+bool pipeTrim() { return false; }
 void pipeStatsReset() {}
 String pipeStatsJson() { return ""; }
 #endif

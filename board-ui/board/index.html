@@ -285,7 +285,12 @@ async function speedTest(){
     const b=await r.arrayBuffer();return b.byteLength/((performance.now()-t0)/1000)};
   const R={};
   const tests=[['in1','Wi-Fi to board, 1 connection',()=>up(1,false,6)],['in3','Wi-Fi to board, 3 at once',()=>up(3,false,6)],['in4','Wi-Fi to board, 4 at once',()=>up(4,false,8)]];
-  if(card)tests.push(['save4','Wi-Fi to board + saving to card, 4 at once',()=>up(4,true,8)]);
+  let pipe=null;
+  if(card)tests.push(['save4','Wi-Fi to board + saving to card, 4 at once',async()=>{
+    await fetch('/api/board/speedtest/pipe',{method:'POST'}).catch(()=>{});
+    const v=await up(4,true,8);
+    pipe=await fetch('/api/board/speedtest/pipe',{cache:'no-store'}).then(r=>r.json()).catch(()=>null);
+    return v}]);
   tests.push(['out','Board to Wi-Fi (downloads)',down]);
   let cardRes=null;
   try{
@@ -294,6 +299,11 @@ async function speedTest(){
       const r=await fetch('/api/board/speedtest/card',{cache:'no-store'});const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||'Card test failed');
       cardRes=j;const w=j.bytes/Math.max(1,j.writeMs)*1000,rd=j.bytes/Math.max(1,j.readMs)*1000;
       rows[rows.length-1][1]='saves '+(w/MB).toFixed(1)+' MB/s · reads '+(rd/MB).toFixed(1)+' MB/s';show();R.cardW=w}
+    if(pipe&&pipe.on!==undefined){
+      const sec=Math.max(1,pipe.ms)/1000,busy=Math.round(pipe.writeMs/Math.max(1,pipe.ms)*100);
+      rows.push(['Card writer (during that test)',pipe.on
+        ?`on · ${pipe.blocks} blocks saved · card busy ${busy}% of the time · Wi-Fi side waited ${pipe.takeWaitMs} ms for free blocks and ${pipe.finishWaitMs} ms at piece ends · queue peaked at ${pipe.maxQueued}`
+        :`off${pipe.failed?' (no room for its buffers: '+Math.round(pipe.freePsram/1024)+' KB PSRAM free)':''} · saving went the direct way`]);show()}
   }catch(e){if(rows.length)rows[rows.length-1][1]='failed';show();msg.className='msg err';msg.textContent=e.message;btn.disabled=false;return}
   const say=[],M=b=>(b*8/1e6).toFixed(1),best=Math.max(R.in3,R.in4);
   const gain=Math.round((best/R.in1-1)*100);

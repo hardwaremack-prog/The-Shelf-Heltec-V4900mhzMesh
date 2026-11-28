@@ -101,6 +101,13 @@ bool handleSpeedTestApi(AsyncWebServerRequest* r, const String& url, WebRequestM
     return true;
   }
 
+  if (url == "/api/board/speedtest/pipe") {               // GET: the card writer's counters; POST: start counting afresh
+    if (m == HTTP_POST) pipeStatsReset();
+    String j = pipeStatsJson();
+    sendJson(r, 200, j.length() ? j : String("{}"));
+    return true;
+  }
+
   if (url == "/api/board/speedtest/down" && m == HTTP_GET) {
     size_t bytes = r->hasParam("bytes") ? strtoul(r->getParam("bytes")->value().c_str(), nullptr, 10) : 0;
     if (!bytes || bytes > SPEED_MAX) bytes = 4u * 1024u * 1024u;

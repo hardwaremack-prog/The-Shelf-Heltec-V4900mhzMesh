@@ -172,6 +172,8 @@ int  pipeOpen(uint8_t target, const char* id, uint64_t off);   // a slot, or -1 
 bool pipeFeed(int slot, const uint8_t* data, size_t len);
 bool pipeEnd(int slot, bool markDone, uint64_t chunkOff);
 bool pipeFinish(int slot, uint32_t timeoutMs);                  // waits for its blocks; frees the slot
+void pipeStatsReset();          // speed test: what the card writer did (empty JSON off the V4 MMC)
+String pipeStatsJson();
 // bigfiles.cpp: Big Transfer (Heltec V4 MMC only; elsewhere these do nothing)
 bool isBigChunk(const String& url);
 void bigBody(AsyncWebServerRequest* r, uint8_t* data, size_t len, size_t index, size_t total);

@@ -35,6 +35,9 @@ static Slot slots[PIPE_SLOTS];
 static QueueHandle_t jobQ = nullptr, freeQ = nullptr;
 static uint8_t* bounce = nullptr;
 static File speedF;                    // writer task only
+// What the speed test reports (reset at its start): did the writer run, and who waited on whom
+static volatile uint32_t stTakeWaitMs = 0, stFinishWaitMs = 0, stWriteMs = 0, stBlocks = 0, stMaxQueued = 0, stT0 = 0;
+static bool pipeFailed = false;
 static volatile int speedActive = 0;
 
 bool bigPipeWrite(const char* id, uint64_t off, const uint8_t* buf, size_t n);   // bigfiles.cpp
@@ -47,18 +50,24 @@ static void writerTask(void*) {
     Slot& s = slots[j.slot];
     bool ok = true;
     switch (j.kind) {
-      case J_BIG:
+      case J_BIG: {
+        uint32_t q = uxQueueMessagesWaiting(jobQ) + 1; if (q > stMaxQueued) stMaxQueued = q;
+        uint32_t t = millis();
         memcpy(bounce, j.blk, j.len);
         ok = bigPipeWrite(s.id, j.off, bounce, j.len);
-        break;
+        stWriteMs += millis() - t; stBlocks++;
+        break; }
       case J_MARK:
         ok = bigPipeMark(s.id, j.off);
         break;
-      case J_SPEED:
+      case J_SPEED: {
+        uint32_t q = uxQueueMessagesWaiting(jobQ) + 1; if (q > stMaxQueued) stMaxQueued = q;
+        uint32_t t = millis();
         memcpy(bounce, j.blk, j.len);
         if (!speedF) { mkdirs(TMP_ROOT "/speed"); speedF = store->open(SPEED_FILE, FILE_WRITE); }
         ok = speedF && speedF.write(bounce, j.len) == j.len;
-        break;
+        stWriteMs += millis() - t; stBlocks++;
+        break; }
       case J_SPEED_CLOSE:
         if (speedActive == 0 && speedF) { speedF.close(); store->remove(SPEED_FILE); }
         break;
@@ -71,7 +80,7 @@ static void writerTask(void*) {
 
 static bool pipeStart() {
   if (jobQ) return true;
-  static bool failed = false;
+  bool& failed = pipeFailed;
   if (failed) return false;
   uint8_t* pool = (uint8_t*)heap_caps_malloc(PIPE_BLOCKS * UPLOAD_BUF, MALLOC_CAP_SPIRAM);
   bounce = (uint8_t*)heap_caps_malloc(UPLOAD_BUF, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
@@ -97,7 +106,10 @@ static bool enqueue(int slot, uint8_t kind, uint64_t off, uint8_t* blk, size_t l
 static bool takeBlock(Slot& s) {
   if (s.blk) return true;
   // all blocks waiting for the card: wait for one (the card is ~6x faster than Wi-Fi, so it's brief)
-  if (xQueueReceive(freeQ, &s.blk, pdMS_TO_TICKS(10000)) != pdTRUE) { s.blk = nullptr; return false; }
+  uint32_t t = millis();
+  bool got = xQueueReceive(freeQ, &s.blk, pdMS_TO_TICKS(10000)) == pdTRUE;
+  stTakeWaitMs += millis() - t;
+  if (!got) { s.blk = nullptr; return false; }
   s.fill = 0;
   return true;
 }
@@ -158,6 +170,7 @@ bool pipeFinish(int slot, uint32_t timeoutMs) {
   Slot& s = slots[slot];
   uint32_t t0 = millis();
   while (s.pending > 0 && millis() - t0 < timeoutMs) vTaskDelay(1);
+  stFinishWaitMs += millis() - t0;
   bool ok = s.pending == 0 && !s.err;
   if (s.pending > 0) { s.last = millis(); return false; }   // still busy: the stale sweep frees it later
   if (s.blk) { xQueueSend(freeQ, &s.blk, 0); s.blk = nullptr; }
@@ -172,4 +185,15 @@ bool pipeFinish(int slot, uint32_t timeoutMs) {
   s.used = false;
   return ok;
 }
+
+void pipeStatsReset() { stTakeWaitMs = stFinishWaitMs = stWriteMs = stBlocks = stMaxQueued = 0; stT0 = millis(); pipeStart(); }
+String pipeStatsJson() {
+  return String("{\"on\":") + (jobQ ? "true" : "false") + ",\"failed\":" + (pipeFailed ? "true" : "false") +
+         ",\"blocks\":" + stBlocks + ",\"writeMs\":" + stWriteMs + ",\"takeWaitMs\":" + stTakeWaitMs +
+         ",\"finishWaitMs\":" + stFinishWaitMs + ",\"maxQueued\":" + stMaxQueued + ",\"ms\":" + (millis() - stT0) +
+         ",\"freePsram\":" + ESP.getFreePsram() + ",\"freeDma\":" + heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA) + "}";
+}
+#else
+void pipeStatsReset() {}
+String pipeStatsJson() { return ""; }
 #endif

@@ -72,7 +72,7 @@ label.l{font-size:13px;color:var(--muted)}
   <h2>This board</h2>
   <div class="card" id="info"><div class="empty">Loading&hellip;</div></div>
   <h2>Speed test</h2>
-  <p class="tip">Finds what sets the speed of a big upload: the Wi-Fi or the microSD card. It sends test data to the board and back (about 30&nbsp;MB, a minute or so) and tests the card on its own. Nothing is kept.</p>
+  <p class="tip">Finds what sets the speed of a big upload: the Wi-Fi or the microSD card. It sends test data to the board and back (about 50&nbsp;MB, a minute or so; Wi-Fi speeds wander, so run it twice to compare) and tests the card on its own. Nothing is kept.</p>
   <div class="card" id="speedRes" style="display:none"></div>
   <div class="btns"><button class="pri" id="speedBtn" onclick="speedTest()">Run speed test</button></div>
   <div class="msg" id="speedMsg"></div>
@@ -288,7 +288,7 @@ async function speedTest(){
   let pipe=null;
   if(card)tests.push(['save4','Wi-Fi to board + saving to card, 4 at once',async()=>{
     await fetch('/api/board/speedtest/pipe',{method:'POST'}).catch(()=>{});
-    const v=await up(4,true,8);
+    const v=await up(4,true,12);
     pipe=await fetch('/api/board/speedtest/pipe',{cache:'no-store'}).then(r=>r.json()).catch(()=>null);
     return v}]);
   tests.push(['out','Board to Wi-Fi (downloads)',down]);

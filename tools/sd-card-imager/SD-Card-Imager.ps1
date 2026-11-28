@@ -4,6 +4,9 @@
 #
 # Only SD cards and USB drives are listed (never the computer's own disks). Images are saved as
 # .img (exact copy) or .img.gz (compressed: empty space shrinks to almost nothing).
+# "Grow to fill card" makes the last partition use the whole card after a smaller card's image
+# was written onto a bigger one (FAT32 and NTFS fully; a Pi's ext4 partition then needs one
+# command on the Pi).
 
 # ---- run as administrator (reading a whole disk needs it)
 $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
@@ -18,6 +21,7 @@ Add-Type -AssemblyName System.Drawing
 
 Add-Type -TypeDefinition @'
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
@@ -173,6 +177,284 @@ public class HeadCollector {
         if (need <= len) { Map = FatMap.Build(buf, len); Done = true; ms = null; }
     }
 }
+// Makes the last partition on a card fill the whole card, after a smaller card's image was
+// written onto a bigger one. (Plain C# 5 so Windows PowerShell 5.1 can compile it.)
+//   FAT32 : the partition and the file system both grow here (the FAT tables get bigger; the
+//           first few clusters move out of their way, and every reference to them is updated).
+//   Linux : the partition grows here; the ext4 file system inside then grows on the Pi with one
+//           command (resize2fs), because Windows can't change ext4.
+//   NTFS  : the PowerShell side uses Windows' own Resize-Partition.
+public class GrowPlan {
+    public string Kind = "none";        // fat32, linux, ntfs, full, unsupported
+    public string Message = "";
+    public int Entry = -1;              // MBR entry 0-3, or -1 for a card with no partition table
+    public int PartNumber;              // Windows' partition number (1-based)
+    public long Start, OldSectors, NewSectors, DiskSectors;
+    public bool CanGrow { get { return Kind == "fat32" || Kind == "linux" || Kind == "ntfs"; } }
+}
+
+public static class CardGrower {
+    const int SECTOR = 512;
+    const uint EOC_MIN = 0x0FFFFFF8, BAD = 0x0FFFFFF7;
+
+    static uint U32(byte[] b, int o) { return (uint)(b[o] | (b[o + 1] << 8) | (b[o + 2] << 16) | (b[o + 3] << 24)); }
+    static int U16(byte[] b, int o) { return b[o] | (b[o + 1] << 8); }
+    static void P32(byte[] b, int o, uint v) { b[o] = (byte)v; b[o + 1] = (byte)(v >> 8); b[o + 2] = (byte)(v >> 16); b[o + 3] = (byte)(v >> 24); }
+
+    static void ReadAt(Stream s, long off, byte[] buf, int len) {
+        s.Seek(off, SeekOrigin.Begin);
+        int got = 0;
+        while (got < len) { int n = s.Read(buf, got, len - got); if (n <= 0) throw new IOException("The card stopped answering while being read."); got += n; }
+    }
+    static byte[] ReadAt(Stream s, long off, int len) { byte[] b = new byte[len]; ReadAt(s, off, b, len); return b; }
+    static void WriteAt(Stream s, long off, byte[] buf, int len) { s.Seek(off, SeekOrigin.Begin); s.Write(buf, 0, len); s.Flush(); }
+
+    static bool IsFat32Boot(byte[] b) {
+        return b[510] == 0x55 && b[511] == 0xAA && b[82] == 'F' && b[83] == 'A' && b[84] == 'T' && b[85] == '3' && b[86] == '2';
+    }
+    static string Oem(byte[] b) { return System.Text.Encoding.ASCII.GetString(b, 3, 8); }
+
+    // Looks at the card and works out what growing it would do. Changes nothing.
+    public static GrowPlan Check(Stream s, long diskBytes) {
+        GrowPlan p = new GrowPlan();
+        p.DiskSectors = Math.Min(diskBytes / SECTOR, 0xFFFFFFFFL);            // MBR limit (2 TB)
+        byte[] mbr = ReadAt(s, 0, SECTOR);
+        if (mbr[510] != 0x55 || mbr[511] != 0xAA) { p.Kind = "unsupported"; p.Message = "The card has no partition table that this app understands."; return p; }
+
+        if (IsFat32Boot(mbr)) {                                                 // whole card is one FAT32 volume
+            p.Entry = -1; p.PartNumber = 0; p.Start = 0; p.OldSectors = U32(mbr, 32); p.Kind = "fat32";
+        } else {
+            long bestEnd = -1; int count = 0;
+            for (int i = 0; i < 4; i++) {
+                int e = 446 + 16 * i; byte type = mbr[e + 4];
+                if (type == 0) continue;
+                count++;
+                if (type == 0xEE) { p.Kind = "unsupported"; p.Message = "This card uses a GPT partition table, which this app doesn't grow yet."; return p; }
+                if (type == 0x05 || type == 0x0F || type == 0x85) { p.Kind = "unsupported"; p.Message = "This card has an extended partition, which this app doesn't grow."; return p; }
+                long st = U32(mbr, e + 8), sz = U32(mbr, e + 12);
+                if (st + sz > bestEnd) { bestEnd = st + sz; p.Entry = i; p.Start = st; p.OldSectors = sz; p.PartNumber = count; }
+            }
+            if (p.Entry < 0) { p.Kind = "unsupported"; p.Message = "The card has no partitions."; return p; }
+            // Windows numbers partitions in table order; count entries up to the one we picked
+            int num = 0; for (int i = 0; i <= p.Entry; i++) if (mbr[446 + 16 * i + 4] != 0) num++;
+            p.PartNumber = num;
+            byte t = mbr[446 + 16 * p.Entry + 4];
+            byte[] boot = ReadAt(s, p.Start * SECTOR, SECTOR);
+            if ((t == 0x0B || t == 0x0C) && IsFat32Boot(boot)) p.Kind = "fat32";
+            else if (t == 0x83) {
+                byte[] sb = ReadAt(s, p.Start * SECTOR + 1024, SECTOR);
+                p.Kind = (sb[56] == 0x53 && sb[57] == 0xEF) ? "linux" : "unsupported";
+                if (p.Kind == "unsupported") p.Message = "The last partition is a Linux partition but not ext4, so it's left alone.";
+            }
+            else if (t == 0x07 && Oem(boot) == "NTFS    ") p.Kind = "ntfs";
+            else if (t == 0x07 && Oem(boot) == "EXFAT   ") { p.Kind = "unsupported"; p.Message = "The last partition is exFAT, which this app can't grow."; }
+            else { p.Kind = "unsupported"; p.Message = "The last partition (type " + t.ToString("X2") + ") isn't one this app knows how to grow."; }
+            if (p.Kind == "unsupported") return p;
+        }
+
+        long newSectors = p.DiskSectors - p.Start;
+        newSectors -= newSectors % 2048;                                        // end on a 1 MB boundary
+        if (newSectors - p.OldSectors < 2048 * 64) {                            // less than 64 MB to gain
+            p.Kind = "full"; p.Message = "The card is already using all of its space."; return p;
+        }
+        p.NewSectors = newSectors;
+        if (p.Kind == "fat32") {
+            byte[] boot = ReadAt(s, p.Start * SECTOR, SECTOR);
+            if (U16(boot, 11) != SECTOR) { p.Kind = "unsupported"; p.Message = "This FAT32 volume uses " + U16(boot, 11) + "-byte sectors, which this app doesn't grow."; return p; }
+        }
+        p.Message = "Grows from " + (p.OldSectors * SECTOR / 1000000000.0).ToString("0.0") + " GB to " + (p.NewSectors * SECTOR / 1000000000.0).ToString("0.0") + " GB.";
+        return p;
+    }
+
+    // Writes the bigger size into the partition table entry.
+    static void SetPartitionSize(Stream s, GrowPlan p) {
+        if (p.Entry < 0) return;
+        byte[] mbr = ReadAt(s, 0, SECTOR);
+        int e = 446 + 16 * p.Entry;
+        P32(mbr, e + 12, (uint)p.NewSectors);
+        mbr[e + 5] = 0xFE; mbr[e + 6] = 0xFF; mbr[e + 7] = 0xFF;               // CHS end: "use LBA"
+        WriteAt(s, 0, mbr, SECTOR);
+    }
+
+    public static void Grow(Stream s, GrowPlan p, Action<string> say) {
+        if (p.Kind == "linux") { say("Making the partition bigger..."); SetPartitionSize(s, p); return; }
+        if (p.Kind != "fat32") throw new InvalidOperationException("Nothing to grow here.");
+        GrowFat32(s, p, say);
+        SetPartitionSize(s, p);
+    }
+
+    // ---- FAT32
+    static void GrowFat32(Stream s, GrowPlan p, Action<string> say) {
+        long ps = p.Start * SECTOR;
+        byte[] boot = ReadAt(s, ps, SECTOR);
+        int spc = boot[13], rsvd = U16(boot, 14), nf = boot[16];
+        long fatSz = U32(boot, 36), tot = U32(boot, 32);
+        uint root = U32(boot, 44);
+        int fsInfo = U16(boot, 48), bkBoot = U16(boot, 50);
+        if (spc == 0 || nf == 0 || fatSz == 0) throw new IOException("The FAT32 volume's header doesn't make sense.");
+        long cs = (long)spc * SECTOR;
+        long fatStart = ps + (long)rsvd * SECTOR;
+        long dataStart = fatStart + nf * fatSz * SECTOR;
+        long oldN = (tot - rsvd - nf * fatSz) / spc;                            // clusters 2 .. oldN+1
+        long newTot = p.NewSectors;
+
+        // How much bigger the FAT tables must get: k clusters' worth of room after them.
+        long k = 0, newFat = fatSz, newN = 0;
+        for (; ; k++) {
+            if ((k * spc) % nf != 0) continue;
+            newFat = fatSz + k * spc / nf;
+            newN = (newTot - rsvd - nf * newFat) / spc;
+            if (newFat * SECTOR / 4 >= newN + 2) break;
+            if (k > oldN) throw new IOException("This card's file system is too full to make room for bigger FAT tables.");
+        }
+        if (newN >= 0x0FFFFFF5) throw new IOException("That's more clusters than FAT32 allows.");
+
+        say("Reading the card's file table...");
+        uint[] fat = new uint[oldN + 2];
+        {
+            long bytes = (oldN + 2) * 4, done = 0;
+            byte[] buf = new byte[4 << 20];
+            while (done < bytes) {
+                int want = (int)Math.Min(buf.Length, ((bytes - done) + SECTOR - 1) / SECTOR * SECTOR);
+                ReadAt(s, fatStart + done, buf, want);
+                for (int i = 0; i + 3 < want && done / 4 + i / 4 < fat.Length; i += 4) fat[done / 4 + i / 4] = U32(buf, i) & 0x0FFFFFFF;
+                done += want;
+            }
+            fat[0] = U32(ReadAt(s, fatStart, SECTOR), 0); fat[1] = U32(ReadAt(s, fatStart, SECTOR), 4);
+        }
+
+        // Old clusters 2..k+1 sit where the bigger tables will go: give the used ones new homes at
+        // the end of the old data. Every other cluster keeps its place but its number drops by k.
+        long[] reloc = new long[k + 2];
+        long next = oldN + 2 - k;                                               // first new-numbered cluster past the old data
+        List<long> moving = new List<long>();
+        for (long c = 2; c <= k + 1 && c < oldN + 2; c++) {
+            if (fat[c] == 0 || fat[c] == BAD) continue;
+            reloc[c] = next++; moving.Add(c);
+        }
+        if (next - 1 > newN + 1) throw new IOException("Not enough room to move the first clusters.");
+        Func<long, long> map = delegate (long c) { return c <= k + 1 ? reloc[c] : c - k; };
+        Func<long, long> oldPhys = delegate (long c) { return dataStart + (c - 2) * cs; };
+        long newDataStart = dataStart + k * cs;
+        Func<long, long> newPhys = delegate (long n) { return newDataStart + (n - 2) * cs; };
+
+        // Check every chain and directory before changing anything.
+        Func<uint, bool> okLink = delegate (uint v) { return v >= EOC_MIN || v == BAD || (v >= 2 && v < oldN + 2); };
+        for (long c = 2; c < oldN + 2; c++) {
+            if (fat[c] == 0) continue;
+            if (!okLink(fat[c])) throw new IOException("The card's file table has a broken chain at cluster " + c + ". Run a disk check on it first.");
+            uint v0 = fat[c];
+            if (v0 < EOC_MIN && v0 != BAD && v0 <= k + 1 && reloc[v0] == 0) throw new IOException("The card's file table points at an empty cluster (" + v0 + "). Run a disk check on it first.");
+        }
+        say("Reading the folders...");
+        List<List<long>> dirs = new List<List<long>>();                         // each folder's clusters, in order
+        HashSet<long> seenDir = new HashSet<long>();
+        Queue<long> todo = new Queue<long>();
+        todo.Enqueue(root);
+        while (todo.Count > 0) {
+            long first = todo.Dequeue();
+            if (first < 2 || first >= oldN + 2 || !seenDir.Add(first)) continue;
+            List<long> chain = new List<long>();
+            HashSet<long> inChain = new HashSet<long>();
+            for (long c = first; c >= 2 && c < oldN + 2 && inChain.Add(c); ) {
+                chain.Add(c);
+                uint v = fat[c];
+                if (v == 0 || v >= EOC_MIN || v == BAD) break;
+                c = v;
+            }
+            dirs.Add(chain);
+            bool ended = false;
+            foreach (long c in chain) {
+                if (ended) break;
+                byte[] d = ReadAt(s, oldPhys(c), (int)cs);
+                for (int o = 0; o < cs; o += 32) {
+                    if (d[o] == 0x00) { ended = true; break; }
+                    if (d[o] == 0xE5 || d[o + 11] == 0x0F) continue;
+                    long cl = ((long)U16(d, o + 20) << 16) | (long)U16(d, o + 26);
+                    if (cl == 0) continue;
+                    if (cl < 2 || cl >= oldN + 2 || (cl <= k + 1 && reloc[cl] == 0)) throw new IOException("A folder entry points outside the card (cluster " + cl + "). Run a disk check on it first.");
+                    bool dot = d[o] == '.';
+                    if ((d[o + 11] & 0x10) != 0 && (d[o + 11] & 0x08) == 0 && !dot) todo.Enqueue(cl);
+                }
+            }
+        }
+
+        // 1. copy the clusters that have to move (into space nothing uses yet)
+        say("Moving " + moving.Count + " clusters out of the way...");
+        byte[] cbuf = new byte[cs];
+        foreach (long c in moving) { ReadAt(s, oldPhys(c), cbuf, (int)cs); WriteAt(s, newPhys(reloc[c]), cbuf, (int)cs); }
+
+        // 2. update the cluster numbers in every folder
+        say("Updating " + dirs.Count + " folders...");
+        foreach (List<long> chain in dirs) {
+            bool ended = false;
+            foreach (long c in chain) {
+                if (ended) break;
+                long where = newPhys(map(c));
+                byte[] d = ReadAt(s, where, (int)cs);
+                bool changed = false;
+                for (int o = 0; o < cs; o += 32) {
+                    if (d[o] == 0x00) { ended = true; break; }
+                    if (d[o] == 0xE5 || d[o + 11] == 0x0F) continue;
+                    long cl = ((long)U16(d, o + 20) << 16) | (long)U16(d, o + 26);
+                    if (cl == 0) continue;
+                    long n = map(cl);
+                    if (n == cl) continue;
+                    d[o + 20] = (byte)(n >> 16); d[o + 21] = (byte)(n >> 24);
+                    d[o + 26] = (byte)n; d[o + 27] = (byte)(n >> 8);
+                    changed = true;
+                }
+                if (changed) WriteAt(s, where, d, (int)cs);
+            }
+        }
+
+        // 3. write the bigger FAT tables
+        say("Writing the bigger file tables...");
+        long tableBytes = newFat * SECTOR;
+        uint[] nfat = new uint[newN + 2];
+        nfat[0] = fat[0]; nfat[1] = fat[1];
+        long used = 0;
+        for (long c = 2; c < oldN + 2; c++) {
+            uint v = fat[c];
+            if (v == 0) continue;
+            if (v == BAD && c <= k + 1) continue;                               // bad spot now under the tables
+            uint nv = (v >= EOC_MIN || v == BAD) ? v : (uint)map(v);
+            nfat[map(c)] = nv; used++;
+        }
+        byte[] tbuf = new byte[4 << 20];
+        for (int copy = 0; copy < nf; copy++) {
+            long baseOff = fatStart + copy * tableBytes;
+            for (long done = 0; done < tableBytes; done += tbuf.Length) {
+                int len = (int)Math.Min(tbuf.Length, tableBytes - done);
+                Array.Clear(tbuf, 0, len);
+                long firstEntry = done / 4;
+                for (int i = 0; i < len / 4; i++) {
+                    long ent = firstEntry + i;
+                    if (ent >= nfat.Length) break;
+                    P32(tbuf, i * 4, nfat[ent]);
+                }
+                WriteAt(s, baseOff + done, tbuf, len);
+            }
+        }
+
+        // 4. the volume's header (and its backup copy) and the free-space note
+        say("Updating the volume header...");
+        int[] heads = (bkBoot > 0 && bkBoot < rsvd) ? new int[] { 0, bkBoot } : new int[] { 0 };
+        foreach (int h in heads) {
+            byte[] b = ReadAt(s, ps + (long)h * SECTOR, SECTOR);
+            P32(b, 32, (uint)newTot); P32(b, 36, (uint)newFat); P32(b, 44, (uint)map(root));
+            WriteAt(s, ps + (long)h * SECTOR, b, SECTOR);
+            int fi = fsInfo > 0 && fsInfo < rsvd ? h + fsInfo : -1;
+            if (fi > 0 && fi < rsvd) {
+                byte[] f = ReadAt(s, ps + (long)fi * SECTOR, SECTOR);
+                if (U32(f, 0) == 0x41615252 && U32(f, 484) == 0x61417272) {
+                    P32(f, 488, (uint)(newN - used)); P32(f, 492, 0xFFFFFFFF);
+                    WriteAt(s, ps + (long)fi * SECTOR, f, SECTOR);
+                }
+            }
+        }
+    }
+}
 '@
 
 $CHUNK = 4MB      # a multiple of every card's sector size
@@ -266,12 +548,16 @@ $form.Controls.Add($showAll)
 $showAll.Add_CheckedChanged({ Load-Cards })
 
 $saveBtn = New-Object Windows.Forms.Button
-$saveBtn.Text = 'Save card to image...'; $saveBtn.Location = New-Object Drawing.Point(16, 124); $saveBtn.Size = New-Object Drawing.Size(260, 40)
+$saveBtn.Text = 'Save card to image...'; $saveBtn.Location = New-Object Drawing.Point(16, 124); $saveBtn.Size = New-Object Drawing.Size(172, 40)
 $form.Controls.Add($saveBtn)
 
 $writeBtn = New-Object Windows.Forms.Button
-$writeBtn.Text = 'Write image to card...'; $writeBtn.Location = New-Object Drawing.Point(284, 124); $writeBtn.Size = New-Object Drawing.Size(260, 40)
+$writeBtn.Text = 'Write image to card...'; $writeBtn.Location = New-Object Drawing.Point(194, 124); $writeBtn.Size = New-Object Drawing.Size(172, 40)
 $form.Controls.Add($writeBtn)
+
+$growBtn = New-Object Windows.Forms.Button
+$growBtn.Text = 'Grow to fill card...'; $growBtn.Location = New-Object Drawing.Point(372, 124); $growBtn.Size = New-Object Drawing.Size(172, 40)
+$form.Controls.Add($growBtn)
 
 $bar = New-Object Windows.Forms.ProgressBar
 $bar.Location = New-Object Drawing.Point(16, 180); $bar.Size = New-Object Drawing.Size(528, 22); $bar.Maximum = 1000
@@ -299,7 +585,7 @@ function Load-Cards([bool]$keepStatus = $false) {
 
 function Set-Busy([bool]$on) {
     $script:busy = $on
-    $saveBtn.Enabled = -not $on; $writeBtn.Enabled = -not $on; $refresh.Enabled = -not $on; $combo.Enabled = -not $on; $compress.Enabled = -not $on; $showAll.Enabled = -not $on; $quick.Enabled = -not $on
+    $saveBtn.Enabled = -not $on; $writeBtn.Enabled = -not $on; $growBtn.Enabled = -not $on; $refresh.Enabled = -not $on; $combo.Enabled = -not $on; $compress.Enabled = -not $on; $showAll.Enabled = -not $on; $quick.Enabled = -not $on
     $cancelBtn.Enabled = $on
 }
 
@@ -402,6 +688,72 @@ $saveBtn.Add_Click({
     Set-Busy $false
 })
 
+# Takes every volume on the card away from Windows while its raw sectors change
+function Lock-CardVolumes($card) {
+    $locks = @()
+    foreach ($p in @(Get-Partition -DiskNumber $card.Number -ErrorAction SilentlyContinue)) {
+        $v = $p | Get-Volume -ErrorAction SilentlyContinue
+        if ($v -and $v.Path) { $locks += [RawDisk]::LockVolume(($v.Path.TrimEnd('\') -replace '^\\\\\?\\', '\\.\')) }
+    }
+    $locks
+}
+
+# ---- grow the last partition to fill the card
+# $afterWrite: called straight after writing an image; then it only speaks up if there's space to gain.
+function Grow-Card($card, [bool]$afterWrite) {
+    $disk = $null
+    try { $disk = [RawDisk]::OpenDisk($card.Number, $false); $plan = [CardGrower]::Check($disk, [int64]$card.Size) }
+    catch { if (-not $afterWrite) { [void][Windows.Forms.MessageBox]::Show("Couldn't read the card: $($_.Exception.Message)", 'SD Card Imager') }; return }
+    finally { if ($disk) { $disk.Dispose() } }
+
+    if (-not $plan.CanGrow) {
+        if (-not $afterWrite) { [void][Windows.Forms.MessageBox]::Show($plan.Message, 'SD Card Imager') }
+        return
+    }
+    $old = Format-Size ($plan.OldSectors * 512); $new = Format-Size ($plan.NewSectors * 512)
+    $intro = if ($afterWrite) { "The image only uses part of this card. " } else { '' }
+    switch ($plan.Kind) {
+        'fat32' { $what = "${intro}Grow the FAT32 partition from $old to $new, so the whole card can be used?`n`nYour files stay where they are. It only takes a minute. Keep the image you wrote until you've checked the card, just in case." }
+        'linux' { $what = "${intro}Grow the card's Linux (Raspberry Pi) partition from $old to $new?`n`nWindows can make the partition bigger but can't touch the files inside it, so after this, boot the Pi from the card once and run this in a Terminal:`n`n    sudo resize2fs /dev/mmcblk0p2`n`n(It takes a few seconds; no reboot needed.)" }
+        'ntfs'  { $what = "${intro}Grow the NTFS partition from $old to $new?" }
+    }
+    if ([Windows.Forms.MessageBox]::Show($what, 'SD Card Imager', 'YesNo', 'Question') -ne 'Yes') { return }
+
+    Set-Busy $true; $cancelBtn.Enabled = $false
+    $locks = @(); $disk = $null; $ok = $false
+    try {
+        if ($plan.Kind -eq 'ntfs') {
+            $status.Text = 'Growing the partition...'; [Windows.Forms.Application]::DoEvents()
+            $max = (Get-PartitionSupportedSize -DiskNumber $card.Number -PartitionNumber $plan.PartNumber).SizeMax
+            Resize-Partition -DiskNumber $card.Number -PartitionNumber $plan.PartNumber -Size $max -ErrorAction Stop
+        } else {
+            $status.Text = 'Getting the card ready...'; [Windows.Forms.Application]::DoEvents()
+            $locks = @(Lock-CardVolumes $card)
+            $disk = [RawDisk]::OpenDisk($card.Number, $true)
+            $say = [Action[string]]{ param($m) $status.Text = $m; [Windows.Forms.Application]::DoEvents() }
+            [CardGrower]::Grow($disk, $plan, $say)
+            $disk.Flush()
+        }
+        $ok = $true
+    } catch {
+        [void][Windows.Forms.MessageBox]::Show("Growing stopped: $($_.Exception.Message)", 'SD Card Imager')
+    } finally {
+        if ($disk) { $disk.Dispose() }
+        foreach ($l in $locks) { $l.Dispose() }
+    }
+    try { Update-Disk -Number $card.Number -ErrorAction SilentlyContinue } catch {}
+    Set-Busy $false
+    if ($ok) {
+        $status.Text = switch ($plan.Kind) {
+            'linux' { "Done: the Linux partition is now $new. On the Pi, run:  sudo resize2fs /dev/mmcblk0p2" }
+            default { "Done: the card now uses all $new. Take it out and put it back in before using it." }
+        }
+    } else { $status.Text = 'Growing stopped. If the card looks wrong, write the image to it again.' }
+    Load-Cards $true
+}
+
+$growBtn.Add_Click({ $card = Selected-Card; if ($card) { Grow-Card $card $false } })
+
 # ---- image -> card
 $writeBtn.Add_Click({
     $card = Selected-Card
@@ -421,7 +773,7 @@ $writeBtn.Add_Click({
     if ([Windows.Forms.MessageBox]::Show($msg, 'SD Card Imager', 'YesNo', 'Warning') -ne 'Yes') { return }
 
     Set-Busy $true; $script:stop = $false
-    $locks = @(); $disk = $null; $in = $null; $gz = $null; $ok = $false
+    $locks = @(); $disk = $null; $in = $null; $gz = $null; $ok = $false; $script:grewAfter = $null
     $sw = [Diagnostics.Stopwatch]::StartNew()
     try {
         $status.Text = 'Getting the card ready...'; [Windows.Forms.Application]::DoEvents()
@@ -468,11 +820,13 @@ $writeBtn.Add_Click({
     if ($ok) {
         $status.Text = "Complete. Written in $(Format-Time $sw.Elapsed.TotalSeconds). Take the card out and put it back in before using it."
         $bar.Value = 0
+        $script:grewAfter = $card
     } else {
         $status.Text = 'Stopped part way: the card is incomplete. Write the image again before using it.'; $bar.Value = 0
     }
     Set-Busy $false
     Load-Cards $true
+    if ($script:grewAfter) { $c = $script:grewAfter; $script:grewAfter = $null; Grow-Card $c $true }
 })
 
 Load-Cards

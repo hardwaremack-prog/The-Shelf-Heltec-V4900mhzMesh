@@ -2,6 +2,8 @@
 
 A small Windows app that **saves a whole SD card to one image file**, **writes an image back onto a card**, and **grows a card to its full size** after you've copied a small card onto a bigger one.
 
+It's fast because it skips a card's empty space instead of copying every byte.
+
 Windows 10 or 11. Nothing to install: it's one PowerShell script and a launcher.
 
 **[Download SD-Card-Imager.zip](../../docs/SD-Card-Imager.zip)**, unzip it, and double-click **SD Card Imager.cmd** (click *Yes* when Windows asks about admin rights, which it needs to read or write a whole card).
@@ -17,12 +19,34 @@ Windows 10 or 11. Nothing to install: it's one PowerShell script and a launcher.
 - **The Shelf's microSD card**: back up the board's card (music, pictures, files) or move it to a bigger card.
 - **Keeping spare copies**: compressed images are small, so you can keep several versions.
 
+## Why it's fast
+
+Most card imagers copy **every byte** of the card, even the parts that hold nothing. A 32 GB card with 3 GB of files still takes as long as a full one, and the image file is a full 32 GB.
+
+SD Card Imager reads the card's own map of which parts are in use (the FAT table) and **skips the empty space** entirely:
+
+- **Saving:** only the parts in use are read from the card. The empty parts become zeros in the image without touching the card.
+- **Writing:** empty parts of the image are skipped on the new card instead of being written as zeros. Writing is the slow part on SD cards, so this saves the most time.
+- **Compressed images:** empty space takes almost nothing in a `.img.gz`, so the file is about the size of what's actually on the card.
+
+Example: a 32 GB card holding 3 GB of files, read at about 85 MB/s and written at about 30 MB/s:
+
+| | Copying every byte | SD Card Imager (Quick) |
+|---|---|---|
+| Save the card | about 6 min | about 1 min |
+| Write it to a new card | about 18 min | about 2 min |
+| Image file size | 32 GB (`.img`) | about 3 GB (`.img.gz`) |
+
+The emptier the card, the bigger the difference. *(Times are worked out from typical card speeds; your card and reader will vary.)*
+
+Quick mode works on FAT32 cards and on the FAT32 part of any card. Other file systems, such as a Raspberry Pi's Linux partition, are copied in full so nothing is missed. Compression still shrinks their empty space in the image file.
+
 ## Features
 
 | | |
 |---|---|
 | **Save a card to an image** | Exact copy as `.img`, or compressed `.img.gz` where empty space takes almost nothing (a 32 GB card holding 3 GB makes an image of about 3 GB). |
-| **Quick mode** | On FAT32 cards it reads the card's own map of used space and skips the empty parts, both when saving and when writing. Much faster on cards that aren't full. |
+| **Quick mode** | On FAT32 cards it reads the card's own map of used space and skips the empty parts, both when saving and when writing. Much faster on cards that aren't full (see [Why it's fast](#why-its-fast)). |
 | **Write an image to a card** | Takes `.img` and `.img.gz` files. Checks that the image fits, and asks you to confirm the card first. |
 | **Grow to fill card** | Makes the last partition use the whole card. FAT32 grows completely in place, Raspberry Pi (ext4) partitions grow and then need one command on the Pi, and NTFS uses Windows' own resize. Offered automatically after writing an image onto a bigger card. |
 | **Safe card list** | Only SD cards and USB drives are listed, never the computer's own disks. Extra warning for anything over 300 GB. |

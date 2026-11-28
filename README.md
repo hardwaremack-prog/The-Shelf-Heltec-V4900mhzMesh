@@ -58,6 +58,24 @@ The V3's J3 row is laid out the same way ([V3 diagram](docs/sd-wiring-shelf-v3.p
 
 With no card, The Shelf keeps files in the board's own flash: about 9 MB on a V4, about 2.5 MB on a V3. The screen shows **SD** or **FLASH** in the corner.
 
+### Heltec V4 MMC (fast 4-bit card reader)
+
+A separate build for a standard V4 (V4.3) with a 9-pin **SDIO card reader** (pins printed 3.3V · GND · D0 · CMD · CLK · D3 · D2 · D1 · CD) instead of the 6-pin SPI module. The board reads it on the ESP32-S3's own SD/MMC host, 4 data lines at 40 MHz, about three times as fast as SPI. Install it with **Install on V4 MMC** on the installer page; it updates over Wi-Fi from its own `shelf-v4-mmc` files, and shows up on the network as `shelf-v4mmc-xxxx`.
+
+![4-bit SD/MMC reader in line on a Heltec V4.3](docs/sd-mmc-wiring-shelf-v4.png)
+
+Lay the reader face down along J3 so **D0 · CMD · CLK · D3 · D2** drop straight into **GPIO 42 · 41 · 40 · 39 · 38**. Its other four pins would land on GPIO 46, 45, 1 and 2 (two boot-strap pins, the battery sense and the LoRa amplifier), so snip them and add three short wires:
+
+| Reader pin | Heltec V4 |
+|---|---|
+| 3.3V | wire to **3V3** |
+| GND | wire to **GND** |
+| D0 · CMD · CLK · D3 · D2 | straight into **42 · 41 · 40 · 39 · 38** |
+| D1 | wire to **GPIO 4** |
+| CD | not used (snip it) |
+
+It tries 4-bit at 40 MHz, then 20 MHz, then 1-bit (D0 only) so a card still works while a D1/D2/D3 wire is checked; the serial log says which one it found. GPIO 38–42 are the GNSS connector's pins, so this build has no GPS. The card's activity flicker on the LED is the SPI library's, so it doesn't flicker on this build.
+
 ### On a Heltec V3
 
 The V3 gets the same Shelf, the same tabs and the same Meshed Comms. Its mesh settings match the V4's, so **V3 and V4 boards are on one mesh**, relaying and catching each other up. The differences:

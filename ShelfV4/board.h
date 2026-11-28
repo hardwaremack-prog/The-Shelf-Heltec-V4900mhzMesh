@@ -27,6 +27,12 @@
 #define HOST_PREFIX "shelf-v3-"
 #define COMS_LOG_KEEP 150     // no PSRAM: keep less of the Coms log in RAM
 #define COMS_RCPT_KEEP 600
+#elif defined(SHELF_MMC)
+#define BOARD_NAME  "Heltec V4 MMC"
+#define BOARD_SHORT "V4"      // same radio and mesh as any V4
+#define HOST_PREFIX "shelf-v4mmc-"
+#define COMS_LOG_KEEP 300
+#define COMS_RCPT_KEEP 2000
 #else
 #define BOARD_NAME  "Heltec V4"
 #define BOARD_SHORT "V4"
@@ -77,7 +83,21 @@
 // CLK 40, MISO 39 are four neighbouring J3 pins in the module's own order, so it can plug
 // straight into the header. On the V4 they're shared with the GNSS connector: leave that empty.
 // V4-R8: GPIO 40 switches its screen power, so it keeps the older layout (CS 4, MISO 6, CLK 47, MOSI 48).
-#if defined(CONFIG_SPIRAM_MODE_OCT) && CONFIG_SPIRAM_MODE_OCT
+#if defined(SHELF_MMC)
+// Heltec V4 MMC (V4.3, ESP32-S3R2): a 4-bit SDIO card reader (3.3V GND D0 CMD CLK D3 D2 D1 CD)
+// on the ESP32-S3's SD/MMC host, about three times as fast as SPI. Laid face down on J3,
+// D2 D3 CLK CMD D0 drop straight into GPIO 38 39 40 41 42. Its 3.3V, GND, D1 and CD pins
+// would land on GPIO 46, 45, 1 and 2 (boot straps, battery sense, LoRa front end), so they're
+// snipped: 3.3V and GND go to the 3V3 and GND holes, D1 goes to GPIO 4, CD isn't used.
+// GPIO 38-42 are the GNSS connector's pins: no GPS on this build.
+#define SD_MMC_CLK 40
+#define SD_MMC_CMD 41
+#define SD_MMC_D0  42
+#define SD_MMC_D1  4
+#define SD_MMC_D2  38
+#define SD_MMC_D3  39
+#define SD_PINS  "SD/MMC 4-bit: CLK 40, CMD 41, D0 42, D1 4, D2 38, D3 39"
+#elif defined(CONFIG_SPIRAM_MODE_OCT) && CONFIG_SPIRAM_MODE_OCT
 #define SD_CS    4
 #define SD_MISO  6
 #define SD_SCK   47

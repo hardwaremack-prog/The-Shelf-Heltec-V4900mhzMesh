@@ -1,0 +1,20 @@
+{
+  "name": "The Shelf for Heltec V4 MMC",
+  "version": "1.9.9",
+  "new_install_prompt_erase": true,
+  "builds": [
+    {
+      "chipFamily": "ESP32-S3",
+      "parts": [
+        {
+          "path": "firmware/shelf-v4-mmc-boot.bin",
+          "offset": 0
+        },
+        {
+          "path": "firmware/shelf-v4-mmc-main.bin",
+          "offset": 57344
+        }
+      ]
+    }
+  ]
+}

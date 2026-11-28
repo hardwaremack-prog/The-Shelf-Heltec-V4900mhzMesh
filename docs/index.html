@@ -78,6 +78,16 @@ ul.ok{padding-left:20px;margin:0}ul.ok li{margin-bottom:6px}
       <small>For the ESP32-S3R8 version. Its listing or box says "R8" or "8MB PSRAM".</small>
     </div>
     <div class="card">
+      <span class="tag">Fast card</span>
+      <h3>Heltec V4 MMC (4-bit SD card reader)</h3>
+      <esp-web-install-button manifest="manifest-shelf-v4-mmc.json">
+        <button slot="activate">Install on V4 MMC</button>
+        <span slot="unsupported" class="muted">Open this page in Chrome or Edge to install.</span>
+        <span slot="not-allowed" class="muted">This page has to be opened over https.</span>
+      </esp-web-install-button>
+      <small>A standard V4 with a 9-pin SDIO card reader (3.3V GND D0 CMD CLK D3 D2 D1 CD) on the ESP32's SD/MMC bus, about 3× faster than the usual SPI module. <a href="https://github.com/hardwaremack-prog/The-Shelf-Heltec-V4900mhzMesh#heltec-v4-mmc-fast-4-bit-card-reader">Wiring</a>. No GPS kit on this one.</small>
+    </div>
+    <div class="card">
       <span class="tag">V3</span>
       <h3>Heltec V3</h3>
       <esp-web-install-button manifest="manifest-shelf-v3.json">
@@ -165,7 +175,7 @@ ul.ok{padding-left:20px;margin:0}ul.ok li{margin-bottom:6px}
 
 
   <h2>Updates over Wi-Fi</h2>
-  <p>From v1.9, open the board's settings page and choose <b>Update firmware</b> (or go to <code>/update</code> on the board). <b>Check for update</b> downloads the newest version from this site and installs it; your files and settings stay. On the board's own Wi-Fi, where there's no internet, download your board's file first (<a href="firmware/shelf-v4-main.bin" download>V4</a> · <a href="firmware/shelf-v4-r8-main.bin" download>V4-R8</a> · <a href="firmware/shelf-v3-main.bin" download>V3</a> · <a href="firmware/shelf-esp32-main.bin" download>ESP32</a>) and use <b>Update from a file</b>. The board's screen shows the progress. The update page is built into the firmware, so it still works if an update is ever cut off.</p>
+  <p>From v1.9, open the board's settings page and choose <b>Update firmware</b> (or go to <code>/update</code> on the board). <b>Check for update</b> downloads the newest version from this site and installs it; your files and settings stay. On the board's own Wi-Fi, where there's no internet, download your board's file first (<a href="firmware/shelf-v4-main.bin" download>V4</a> · <a href="firmware/shelf-v4-r8-main.bin" download>V4-R8</a> · <a href="firmware/shelf-v4-mmc-main.bin" download>V4 MMC</a> · <a href="firmware/shelf-v3-main.bin" download>V3</a> · <a href="firmware/shelf-esp32-main.bin" download>ESP32</a>) and use <b>Update from a file</b>. The board's screen shows the progress. The update page is built into the firmware, so it still works if an update is ever cut off.</p>
 
   <h2 id="backup">Back up or restore the whole board</h2>
   <p>Save everything on the board's own flash to one compressed file: the firmware, your Wi-Fi, admin password, Coms history, and any files kept on the board when no card is fitted. Restore puts it all back exactly as it was, on this board or a replacement of the same kind. Plug in over USB-C like an install. The microSD card is backed up separately, over Wi-Fi, from the board's settings page.</p>
@@ -317,7 +327,7 @@ function confirmRestore(name, n) {
 <script>
 // which version the Install buttons put on the board (the same files Update firmware fetches)
 fetch('ota/shelf-v4.json',{cache:'no-store'}).then(r=>r.json()).then(j=>{const e=document.getElementById('verPill');
-  e.innerHTML='This flasher installs <b>The Shelf '+j.version+'</b> (every board: V4, V4-R8, V3 and ESP32)';e.hidden=false;}).catch(()=>{});
+  e.innerHTML='This flasher installs <b>The Shelf '+j.version+'</b> (every board: V4, V4-R8, V4 MMC, V3 and ESP32)';e.hidden=false;}).catch(()=>{});
 </script>
 </body>
 </html>

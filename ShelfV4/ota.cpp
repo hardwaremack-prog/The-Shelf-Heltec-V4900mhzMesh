@@ -21,6 +21,8 @@
   #define FW_ID "shelf-esp32"
 #elif defined(SHELF_V3)
   #define FW_ID "shelf-v3"
+#elif defined(SHELF_MMC)
+  #define FW_ID "shelf-v4-mmc"
 #elif CONFIG_SPIRAM_MODE_OCT
   #define FW_ID "shelf-v4-r8"
 #else

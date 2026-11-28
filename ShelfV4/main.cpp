@@ -10,6 +10,13 @@
 #include <new>
 #include <Preferences.h>
 #include <SD.h>
+#if defined(SHELF_MMC)
+#include <SD_MMC.h>
+#include <driver/gpio.h>
+#define SDCARD SD_MMC      // the card is on the SD/MMC host, not SPI
+#else
+#define SDCARD SD
+#endif
 #include <SPI.h>
 #include <FFat.h>
 #include <LittleFS.h>
@@ -305,6 +312,26 @@ static void drawStatusPage() {
 // ------------------------------------------------------------ storage
 bool sdOnAlt = false;                       // the card is on the second layout (GNSS connector free)
 static void setupStorage() {
+#if defined(SHELF_MMC)
+  // 4-bit SD/MMC. Fastest first (40 MHz), then 20 MHz for longer jumpers, then 1-bit
+  // (D0 only) in case the D1/D2/D3 wiring isn't right, so a card still works while you check it.
+  static const int mmcPins[] = {SD_MMC_CLK, SD_MMC_CMD, SD_MMC_D0, SD_MMC_D1, SD_MMC_D2, SD_MMC_D3};
+  SD_MMC.setPins(SD_MMC_CLK, SD_MMC_CMD, SD_MMC_D0, SD_MMC_D1, SD_MMC_D2, SD_MMC_D3);
+  struct { bool oneBit; int khz; const char* what; } tries[] = {
+    {false, SDMMC_FREQ_HIGHSPEED, "4-bit, 40 MHz"}, {false, SDMMC_FREQ_DEFAULT, "4-bit, 20 MHz"},
+    {true, SDMMC_FREQ_DEFAULT, "1-bit, 20 MHz (check the D1, D2, D3 wires)"}};
+  for (auto& t : tries) {
+    // the card's lines need pull-ups; most readers have them, the ESP32's own back them up
+    for (int pin : mmcPins) gpio_pullup_en((gpio_num_t)pin);
+    if (SD_MMC.begin("/sd", t.oneBit, false, t.khz, 10) && SD_MMC.cardType() != CARD_NONE) {
+      for (int pin : mmcPins) gpio_pullup_en((gpio_num_t)pin);
+      onSD = true;
+      Serial.printf("[shelf] microSD found on SD/MMC, %s\n", t.what);
+      break;
+    }
+    SD_MMC.end();
+  }
+#else
 #ifdef SD_ALT_CS
   pinMode(SD_ALT_CS, INPUT_PULLUP);          // keeps a card on the other layout deselected meanwhile
 #endif
@@ -345,7 +372,8 @@ static void setupStorage() {
     if (onSD) { sdOnAlt = true; Serial.println("[shelf] microSD found on CS 4, MISO 6, CLK 47, MOSI 48"); }
   }
 #endif
-  if (onSD) store = &SD;
+#endif   // SHELF_MMC
+  if (onSD) store = &SDCARD;
   else {
     oledMsg("THE SHELF " BOARD_SHORT, "No microSD found", "Using board flash", "(first boot formats)");
     if (!FFat.begin(true, "/ffat", 10, "ffat")) oledMsg("Storage error", "Flash format failed");
@@ -359,7 +387,7 @@ static void setupStorage() {
 }
 
 static void refreshStats() {
-  if (onSD) { storeTotal = SD.totalBytes(); storeUsed = SD.usedBytes(); }
+  if (onSD) { storeTotal = SDCARD.totalBytes(); storeUsed = SDCARD.usedBytes(); }
   else { storeTotal = FFat.totalBytes(); storeUsed = FFat.usedBytes(); }
   statsDirty = false;
 }
@@ -455,7 +483,7 @@ static void goDeepSleep() {
   if (oledInline) { digitalWrite(OLED_INLINE_VCC, LOW); gpio_hold_en((gpio_num_t)OLED_INLINE_VCC); gpio_deep_sleep_hold_en(); }
 #endif
   WiFi.disconnect(true); WiFi.mode(WIFI_OFF);
-  if (onSD) SD.end();
+  if (onSD) SDCARD.end();
   Serial.flush();
   rtc_gpio_pullup_en((gpio_num_t)PIN_BUTTON); rtc_gpio_pulldown_dis((gpio_num_t)PIN_BUTTON);
   esp_sleep_enable_ext0_wakeup((gpio_num_t)PIN_BUTTON, 0);

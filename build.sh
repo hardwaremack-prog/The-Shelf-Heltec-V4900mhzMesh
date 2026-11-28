@@ -2,6 +2,7 @@
 # Builds The Shelf into docs/firmware/, for:
 #   shelf-v4     Heltec V4  (ESP32-S3R2, 2 MB PSRAM)  -- most V4 boards
 #   shelf-v4-r8  Heltec V4-R8 (ESP32-S3R8, 8 MB PSRAM)
+#   shelf-v4-mmc Heltec V4 MMC: a standard V4 with a 4-bit SD/MMC card reader (-DSHELF_MMC)
 #   shelf-v3     Heltec V3  (ESP32-S3FN8, 8 MB flash, no PSRAM)
 #   shelf-esp32  a plain ESP32 dev board (NodeMCU-32S / DevKitC: ESP32-D0WD, 4 MB flash)
 # Each comes as two pieces, so installing never touches the settings saved at 0x9000-0xE000
@@ -92,6 +93,7 @@ PY
 #     name        PSRAM    flash partitions       app max  www       defines     Serial
 build shelf-v4    enabled  16M   v4_16mb.csv      2097152  0x410000  ""          cdc
 build shelf-v4-r8 opi      16M   v4_16mb.csv      2097152  0x410000  ""          cdc
+build shelf-v4-mmc enabled 16M   v4_16mb.csv      2097152  0x410000  -DSHELF_MMC cdc
 build shelf-v3    disabled 8M    v3_8mb.csv       1703936  0x350000  -DSHELF_V3  default   # V3 talks USB through a CP2102
 build shelf-esp32 disabled 4M    esp32_4mb.csv    2424832  0x2C0000  -DSHELF_ESP32 -       # USB through a CP2102/CH340
 ls -la docs/firmware

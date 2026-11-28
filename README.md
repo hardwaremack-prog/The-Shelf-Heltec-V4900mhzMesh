@@ -335,7 +335,7 @@ The same, with the module on the bottom side of the board (seen from underneath)
 
 ![0.96 inch OLED plugged in line on an ESP32](docs/oled-wiring-shelf-esp32-inline.png)
 
-**Copying a card to another card (Windows):** [SD Card Imager](docs/SD-Card-Imager.zip) (source in `tools/sd-card-imager/`) saves a whole card to one compressed `.img.gz` and writes an image back onto a card. Unzip it and double-click *SD Card Imager.cmd*; it asks for admin rights, which Windows needs for reading or writing a whole card. Only SD cards and USB drives are listed. Moved to a bigger card? **Grow to fill card** makes the card use all its space. Features, uses and screenshots: [tools/sd-card-imager](tools/sd-card-imager/README.md).
+**Copying a card to another card (Windows):** [SD Card Imager](docs/SD-Card-Imager.zip) (source in `tools/sd-card-imager/`) saves a whole card to one compressed `.img.gz` and writes an image back onto a card. Unzip it and double-click *SD Card Imager.cmd*; it asks for admin rights, which Windows needs for reading or writing a whole card. Only SD cards and USB drives are listed. Moved to a bigger card? **Grow to fill card** makes the card use all its space. Features, uses and screenshots: [tools/sd-card-imager](tools/sd-card-imager/README.md), also in its own repo: [sd-card-imager](https://github.com/hardwaremack-prog/sd-card-imager).
 
 ## Backups
 

@@ -84,11 +84,8 @@ if not nimg:
 if big_files:
     reps = [
         ("const BIGFILE_CHUNK_SIZE = 16 * 1024 * 1024;", "const BIGFILE_CHUNK_SIZE = 1024 * 1024;   // the board takes 1 MB at a time"),
-        ("""      const res = await fetch(`/api/bigfiles/${u.uploadId}/chunk?offset=${u.uploadedBytes}`, {
-        method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: chunk,
-      });""", """      const res = await bigChunkXhr(`/api/bigfiles/${u.uploadId}/chunk?offset=${u.uploadedBytes}`, chunk, u);"""),
         ("""  const pct = u.size ? Math.round((u.uploadedBytes / u.size) * 100) : 0;
-  const label = u.status === 'error'""", """  const live = Math.min(u.size || 0, u.uploadedBytes + (u.status === 'uploading' ? (u.liveBytes || 0) : 0));
+  const label = u.status === 'error'""", """  const live = Math.min(u.size || 0, u.status === 'uploading' ? bigLiveTotal(u) : u.uploadedBytes);
   const pct = u.size ? Math.floor((live / u.size) * 1000) / 10 : 0;
   const label = u.status === 'error'"""),
         (""": `${humanFileSize(u.uploadedBytes)} of ${humanFileSize(u.size)} (${pct}%)`;""",
@@ -98,30 +95,107 @@ if big_files:
         if a not in app:
             sys.exit("pack_www: Big Transfer code in app.js changed -- update the V4MMC patches (" + a[:50] + "...)")
         app = app.replace(a, b, 1)
+    # the upload loop: three chunks at a time (see bigUploadLanes below)
+    app, n = re.subn(r"\nasync function uploadBigfileChunks\(\) \{\n.*?\n\}\n",
+                     "\nasync function uploadBigfileChunks() { return bigUploadLanes(); }\n", app, count=1, flags=re.S)
+    if n != 1:
+        sys.exit("pack_www: couldn't find uploadBigfileChunks in app.js -- update the V4MMC patches")
     app += r"""
 
-// ---- Heltec V4 MMC: Big Transfer progress while a chunk is on its way, with speed and time left
-function bigChunkXhr(url, blob, u) {
+// ---- Heltec V4 MMC: Big Transfer, three chunks at a time, with live progress, speed and time left.
+// The board only lets ~6 KB be in flight per connection, so one connection tops out around
+// 6 Mbps; three connections side by side get round that. The board writes each chunk straight
+// into its place in the file, whatever order they arrive in.
+const BIG_LANES = 3;
+async function bigUploadLanes() {
+  const u = bigfileUpload;
+  if (!u || u.running) return;
+  u.running = true;
+  const C = BIGFILE_CHUNK_SIZE;
+  u.live = {};                      // offset -> bytes of that chunk sent so far
+  u.extraDone = 0;                  // finished chunks beyond the unbroken run at the front
+  const done = new Set();
+  let next = u.uploadedBytes, failed = null;
+  const inflight = new Set();
+  const settle = () => {            // the unbroken run at the front moves on over finished chunks
+    while (done.has(u.uploadedBytes)) {
+      done.delete(u.uploadedBytes);
+      const n = Math.min(C, u.size - u.uploadedBytes);
+      u.uploadedBytes += n; u.extraDone -= n;
+    }
+  };
+  const sendOne = async (off) => {
+    const end = Math.min(off + C, u.size);
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const res = await bigChunkXhr(`/api/bigfiles/${u.uploadId}/chunk?offset=${off}`, u.file.slice(off, end), u, off);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'The upload was rejected.');
+        u.extraDone += end - off; done.add(off); settle();
+        bigSpeedSample(u, bigLiveTotal(u));
+        renderBigfileUploadCard();
+        return;
+      } catch (err) {
+        if (attempt >= 2 || bigfileUpload !== u) throw err;   // a wobble: try that chunk again, twice
+        await new Promise(r => setTimeout(r, 1500 * (attempt + 1)));
+      }
+    }
+  };
+  try {
+    for (;;) {
+      while (!failed && !u.paused && bigfileUpload === u && inflight.size < BIG_LANES && next < u.size) {
+        const off = next; next += C;
+        const p = sendOne(off).catch(err => { failed = failed || err; }).finally(() => inflight.delete(p));
+        inflight.add(p);
+      }
+      if (!inflight.size) break;
+      await Promise.race(inflight);
+    }
+  } finally { u.running = false; }
+  if (bigfileUpload !== u) return;                        // cancelled meanwhile
+  if (failed) { u.status = 'error'; u.error = failed.message || 'The connection dropped.'; renderBigfileUploadCard(); return; }
+  if (u.paused) return;                                   // Resume starts the lanes again from the front run
+
+  u.status = 'finishing';
+  renderBigfileUploadCard();
+  try {
+    const res = await fetch(`/api/bigfiles/${u.uploadId}/complete`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Could not finish the upload.');
+    u.status = 'done';
+  } catch (err) {
+    u.status = 'error'; u.error = err.message; renderBigfileUploadCard(); return;
+  }
+  bigfileUpload = null;
+  hideBulkProgress();
+  if (state.view === 'bigfiles') renderBigfilesView();
+  startNextBigfileUpload();
+}
+function bigLiveTotal(u) {
+  let inAir = 0;
+  for (const k in (u.live || {})) inAir += u.live[k];
+  return u.uploadedBytes + (u.extraDone || 0) + inAir;
+}
+function bigChunkXhr(url, blob, u, off) {
   return new Promise((resolve, reject) => {
     const x = new XMLHttpRequest();
     x.open('POST', url);
     x.setRequestHeader('Content-Type', 'application/octet-stream');
-    let last = 0;
+    const clear = () => { if (u.live) delete u.live[off]; };
     x.upload.onprogress = (e) => {
-      u.liveBytes = e.loaded;
-      bigSpeedSample(u, u.uploadedBytes + e.loaded);
+      if (u.live) u.live[off] = e.loaded;
+      bigSpeedSample(u, bigLiveTotal(u));
       const now = performance.now();
-      if (now - last > 250) { last = now; renderBigfileUploadCard(); }
+      if (!u.lastDraw || now - u.lastDraw > 250) { u.lastDraw = now; renderBigfileUploadCard(); }
     };
     x.onload = () => {
-      u.liveBytes = 0;
+      clear();
       let body = {};
       try { body = JSON.parse(x.responseText || '{}'); } catch { /* not JSON */ }
-      if (typeof body.receivedBytes === 'number') bigSpeedSample(u, body.receivedBytes);
       resolve({ ok: x.status >= 200 && x.status < 300, status: x.status, json: async () => body });
     };
-    x.onerror = () => { u.liveBytes = 0; reject(new Error('The connection dropped.')); };
-    x.onabort = () => { u.liveBytes = 0; reject(new Error('The upload was stopped.')); };
+    x.onerror = () => { clear(); reject(new Error('The connection dropped.')); };
+    x.onabort = () => { clear(); reject(new Error('The upload was stopped.')); };
     x.send(blob);
   });
 }

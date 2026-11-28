@@ -1,8 +1,10 @@
 // The Shelf for Heltec V4 - Big Transfer (the "bigfiles" tab), Heltec V4 MMC build only.
 //
-// The same API as The Shelf's server.js, so its page works unchanged: a big file comes up in
-// 16 MB chunks, each one appended where the last stopped; a dropped connection only costs the
-// chunk in flight, and dropping the same file in again picks up where it left off.
+// The same API as The Shelf's server.js. A big file comes up in 1 MB chunks, three at a time
+// over separate connections (the network stack only lets ~6 KB be in flight per connection,
+// so one connection tops out around 6 Mbps); each chunk is written straight into its place in
+// the file, whatever order they land in. A dropped connection only costs the chunk in flight,
+// and dropping the same file in again picks up where it left off.
 //
 // The card is FAT32 (the board's FAT driver has no exFAT), where one file stops at 4 GB, so a
 // file is kept in 1 GB pieces and joined again on the fly when it's downloaded:
@@ -19,28 +21,30 @@
 #define BIG_PART   (1024ULL * 1024ULL * 1024ULL)     // 1 GB pieces: well inside FAT32's 4 GB
 #define BIG_MAGIC  0x53484247u
 
+#define BIG_CHUNK  (1024 * 1024)                    // every chunk but the last is exactly this
+
 struct BigCtx {               // one chunk being written (internal, DMA-capable RAM; the request frees it with free())
   uint32_t magic;
   int code;                   // 0 fine so far; else the HTTP error to answer with
-  uint32_t part;              // which piece is being written
-  uint32_t synced;            // bytes of that piece safely on the card
-  uint64_t received;          // whole upload, before this chunk
-  size_t fill;                // streaming: bytes waiting in buf
-  bool inRam;                 // the chunk is collected in PSRAM first (see bigRam)
-  char path[64];              // the piece's path
-  char dir[40];
+  uint64_t off;               // where the chunk goes in the whole file
+  size_t got;                 // bytes of it written so far
+  size_t fill;                // bytes waiting in buf
+  char id[17];
   alignas(4) uint8_t buf[UPLOAD_BUF];
 };
 
-// A whole chunk is collected in PSRAM while it arrives, so the card never holds up the Wi-Fi
-// (the network stack's receive window is small: every pause in reading the socket slows the
-// sender down), then goes to the card in big writes with one flush. The card's DMA can't read
-// PSRAM, so the writes go through the chunk's own 16 KB of internal RAM. One chunk at a time;
-// a second upload alongside streams straight to the card instead.
-#define BIG_RAM (1024 * 1024)         // the page sends 1 MB chunks to this board
-static uint8_t* bigRam = nullptr;
-static void* bigRamOwner = nullptr;
-static uint32_t bigRamAt = 0;
+// The upload being written. FAT here has no file locking: two handles writing one file would
+// each keep their own idea of its size and chain of clusters and wreck it, so every chunk
+// goes through these single handles. (All web callbacks run on the one network task, so they
+// never write at the same moment.)
+static String upId;
+static String upDir;
+static uint64_t upSize = 0;
+static File upF;                       // the piece being written
+static int32_t upPart = -1;
+static File upDoneF;                   // one byte per chunk: 1 = on the card
+static std::vector<uint8_t> upDone;
+static uint32_t upFirstGap = 0;        // chunks before this are all done
 
 static BigCtx* bigCtx(AsyncWebServerRequest* r) {
   BigCtx* c = (BigCtx*)r->_tempObject;
@@ -79,41 +83,77 @@ static Parts partsOf(const String& dir) {
 
 bool isBigChunk(const String& url) { return url.startsWith("/api/bigfiles/") && url.endsWith("/chunk"); }
 
-static bool openPart(AsyncWebServerRequest* r, BigCtx* c, uint64_t already) {
-  snprintf(c->path, sizeof c->path, "%s/%s", c->dir, partName(c->part).c_str());
-  if (already) {
-    r->_tempFile = store->open(c->path, "r+");
-    if (r->_tempFile && !r->_tempFile.seek((uint32_t)already)) r->_tempFile.close();
+static uint32_t chunkCount(uint64_t size) { return (uint32_t)((size + BIG_CHUNK - 1) / BIG_CHUNK); }
+static uint64_t prefixBytes() {
+  while (upFirstGap < upDone.size() && upDone[upFirstGap]) upFirstGap++;
+  return std::min(upSize, (uint64_t)upFirstGap * BIG_CHUNK);
+}
+static void upClose() {
+  if (upF) { upF.flush(); upF.close(); }
+  if (upDoneF) upDoneF.close();
+  upPart = -1; upId = ""; upDir = ""; upDone.clear(); upDone.shrink_to_fit(); upFirstGap = 0; upSize = 0;
+}
+// Makes `id` the upload being written: loads which chunks are already on the card.
+static bool upOpen(const String& id) {
+  if (upId == id && upDoneF) return true;
+  upClose();
+  String dir = String(BIG_IN "/") + id;
+  JsonDocument info;
+  if (!loadJsonFile(dir + "/info.json", info)) return false;
+  uint64_t size = info["size"] | (uint64_t)0;
+  if (!size) return false;
+  uint32_t n = chunkCount(size);
+  upDone.assign(n, 0);
+  String donePath = dir + "/done";
+  if (store->exists(donePath)) {
+    File f = store->open(donePath, FILE_READ);
+    if (f) { f.read(upDone.data(), n); f.close(); }
   } else {
-    r->_tempFile = store->open(c->path, FILE_WRITE);
+    // started by 1.20.3 or earlier: one piece after another, so the whole chunks at the front are done
+    Parts p = partsOf(dir);
+    for (uint32_t k = 0; k < n && (uint64_t)(k + 1) * BIG_CHUNK <= p.bytes; k++) upDone[k] = 1;
+    if (p.bytes >= size) for (auto& d : upDone) d = 1;
+    File f = store->open(donePath, FILE_WRITE);
+    if (f) { f.write(upDone.data(), n); f.close(); }
   }
-  c->synced = (uint32_t)already;
-  return (bool)r->_tempFile;
+  upDoneF = store->open(donePath, "r+");
+  if (!upDoneF) { upDone.clear(); return false; }
+  upId = id; upDir = dir; upSize = size; upFirstGap = 0;
+  return true;
 }
-// Writes n bytes (never past the end of the current piece) without flushing; a refused write
-// is done again from where the card last had it right (writeBlockRetry reopens and seeks).
-static bool writeSlice(AsyncWebServerRequest* r, BigCtx* c, const uint8_t* src, size_t n) {
-  if (src != c->buf) memcpy(c->buf, src, n);
-  if (r->_tempFile && r->_tempFile.write(c->buf, n) == n) { c->synced += n; return true; }
-  r->_tempFile.close();
-  return writeBlockRetry(r->_tempFile, c->path, c->buf, n, c->synced);
+// Writes n bytes at `off` in the whole file (never across a 1 GB boundary: chunks divide it).
+static bool upWrite(uint64_t off, const uint8_t* buf, size_t n) {
+  int32_t part = (int32_t)(off / BIG_PART);
+  uint32_t at = (uint32_t)(off % BIG_PART);
+  for (int t = 0; t < 3; t++) {
+    if (!upF || upPart != part) {
+      if (upF) { upF.flush(); upF.close(); }
+      String path = upDir + "/" + partName(part);
+      upF = store->open(path, store->exists(path) ? "r+" : "w+");
+      upPart = upF ? part : -1;
+    }
+    // seeking past the end makes the file longer; the gap is filled by the chunks still coming
+    if (upF && upF.seek(at) && upF.write(buf, n) == n) return true;
+    if (upF) upF.close();
+    upPart = -1;
+    sdRetries++;
+    delay(100 * (t + 1));
+  }
+  sdFailures++;
+  return false;
 }
-static bool nextPartIfFull(AsyncWebServerRequest* r, BigCtx* c) {
-  if ((uint64_t)c->synced < BIG_PART) return true;
-  r->_tempFile.flush(); r->_tempFile.close();
-  c->part++;
-  return openPart(r, c, 0);
-}
-static bool finishChunk(AsyncWebServerRequest* r, BigCtx* c) {
-  if (!r->_tempFile) return false;
-  r->_tempFile.flush();
-  bool ok = r->_tempFile.position() == c->synced;
-  r->_tempFile.close();
-  statsDirty = true;
+static bool upMarkDone(uint64_t off) {
+  if (upF) upF.flush();
+  uint32_t k = (uint32_t)(off / BIG_CHUNK);
+  if (k >= upDone.size()) return false;
+  upDone[k] = 1;
+  uint8_t one = 1;
+  bool ok = upDoneF.seek(k) && upDoneF.write(&one, 1) == 1;
+  upDoneF.flush();
   return ok;
 }
 
-// The chunk's bytes, as they arrive.
+// A chunk's bytes, as they arrive: 16 KB at a time into its place in the file.
 void bigBody(AsyncWebServerRequest* r, uint8_t* data, size_t len, size_t index, size_t total) {
   if (index == 0) {
     if (r->_tempObject) return;
@@ -126,64 +166,31 @@ void bigBody(AsyncWebServerRequest* r, uint8_t* data, size_t len, size_t index, 
     if (r->client()) r->client()->setRxTimeout(30);
     if (!canWrite(r)) { c->code = 403; return; }
     String id = idOf(r->url());
-    String dir = String(BIG_IN "/") + id;
-    if (!id.length() || !store->exists(dir + "/info.json")) { c->code = 404; return; }
-    JsonDocument info;
-    if (!loadJsonFile(dir + "/info.json", info)) { c->code = 404; return; }
-    uint64_t size = info["size"] | (uint64_t)0;
-    Parts p = partsOf(dir);
-    c->received = p.bytes;
+    if (!id.length() || !upOpen(id)) { c->code = 404; return; }
+    strlcpy(c->id, id.c_str(), sizeof c->id);
     uint64_t off = r->hasParam("offset") ? strtoull(r->getParam("offset")->value().c_str(), nullptr, 10) : UINT64_MAX;
-    if (off != p.bytes) { c->code = 409; return; }
-    if (p.bytes + total > size) { c->code = 400; return; }
+    // a whole chunk, in its own slot: 1 MB at a 1 MB boundary (the last one may be shorter)
+    if (off >= upSize || off % BIG_CHUNK || total != (size_t)std::min((uint64_t)BIG_CHUNK, upSize - off)) { c->code = 400; return; }
     if (storeTotal && storeTotal - storeUsed < (uint64_t)total + 4 * 1024 * 1024) { c->code = 507; return; }
-    strlcpy(c->dir, dir.c_str(), sizeof c->dir);
-    uint64_t inLast = p.count ? p.last : 0;
-    c->part = p.count ? p.count - 1 : 0;
-    if (inLast >= BIG_PART) { c->part++; inLast = 0; }
-    if (!openPart(r, c, inLast)) { c->code = 500; return; }
-    // the PSRAM buffer: free, or left behind by a chunk whose connection dropped half a minute ago
-    if (total <= BIG_RAM && (!bigRamOwner || millis() - bigRamAt > 30000)) {
-      if (!bigRam) bigRam = (uint8_t*)heap_caps_malloc(BIG_RAM, MALLOC_CAP_SPIRAM);
-      if (bigRam) { bigRamOwner = c; bigRamAt = millis(); c->inRam = true; }
-    }
+    c->off = off;
   }
   BigCtx* c = bigCtx(r);
   if (!c || c->code) return;
-  if (c->inRam) {
-    if (bigRamOwner != c) { c->code = 500; return; }       // (taken over after a 30 s stall)
-    if (index + len <= BIG_RAM) memcpy(bigRam + index, data, len);
-    bigRamAt = millis();
-    if (index + len < total) return;
-    const uint8_t* src = bigRam; size_t left = total;      // all here: onto the card
-    bool ok = true;
-    while (ok && left) {
-      ok = nextPartIfFull(r, c);
-      if (!ok) break;
-      size_t n = std::min(left, (size_t)UPLOAD_BUF);
-      if ((uint64_t)n > BIG_PART - c->synced) n = (size_t)(BIG_PART - c->synced);
-      ok = writeSlice(r, c, src, n); src += n; left -= n;
-    }
-    bigRamOwner = nullptr;
-    if (!ok || !finishChunk(r, c)) c->code = 500;
-    return;
-  }
-  size_t n0 = len;                                           // streaming: 16 KB at a time
+  if (upId != c->id && !upOpen(c->id)) { c->code = 404; return; }   // (another upload took the handles meanwhile)
+  size_t n0 = len;
   while (len) {
-    uint64_t partRoom = BIG_PART - c->synced - c->fill;
     size_t n = std::min(len, (size_t)UPLOAD_BUF - c->fill);
-    if ((uint64_t)n > partRoom) n = (size_t)partRoom;
     memcpy(c->buf + c->fill, data, n); c->fill += n; data += n; len -= n;
-    if (c->fill == UPLOAD_BUF || (uint64_t)c->synced + c->fill >= BIG_PART) {
-      bool ok = writeSlice(r, c, c->buf, c->fill);
-      c->fill = 0;
-      if (!ok || !nextPartIfFull(r, c)) { c->code = 500; r->_tempFile.close(); return; }
+    if (c->fill == UPLOAD_BUF) {
+      if (!upWrite(c->off + c->got, c->buf, c->fill)) { c->code = 500; return; }
+      c->got += c->fill; c->fill = 0;
     }
   }
   if (index + n0 >= total) {
-    bool ok = !c->fill || writeSlice(r, c, c->buf, c->fill);
-    c->fill = 0;
-    if (!ok || !finishChunk(r, c)) c->code = 500;
+    if (c->fill && !upWrite(c->off + c->got, c->buf, c->fill)) { c->code = 500; return; }
+    c->got += c->fill; c->fill = 0;
+    if (!upMarkDone(c->off)) c->code = 500;
+    statsDirty = true;
   }
 }
 
@@ -280,19 +287,20 @@ bool handleBigfilesApi(AsyncWebServerRequest* r, const String& url, WebRequestMe
     String dir = String(BIG_IN "/") + id;
     JsonDocument info;
     if (store->exists(dir + "/info.json") && loadJsonFile(dir + "/info.json", info) && (info["size"] | (uint64_t)0) == size) {
-      Parts p = partsOf(dir);
-      sendJson(r, 200, "{\"uploadId\":\"" + id + "\",\"name\":\"" + jsonEsc(String((const char*)(info["name"] | ""))) + "\",\"receivedBytes\":" + num(p.bytes) + "}");
+      uint64_t have = upOpen(id) ? prefixBytes() : 0;
+      sendJson(r, 200, "{\"uploadId\":\"" + id + "\",\"name\":\"" + jsonEsc(String((const char*)(info["name"] | ""))) + "\",\"receivedBytes\":" + num(have) + ",\"chunkSize\":" + BIG_CHUNK + "}");
       return true;
     }
     if (storeTotal && storeTotal - storeUsed < size + 16ULL * 1024 * 1024) {
       sendErr(r, 507, "There isn't room on the card for that: it needs " + humanSize(size) + " and " + humanSize(storeTotal - storeUsed) + " is free.");
       return true;
     }
+    if (upId == id) upClose();
     removeAll(dir);
     mkdirs(dir);
     info.clear(); info["name"] = name; info["size"] = size; info["createdAt"] = nowMs();
     if (!saveJsonFile(dir + "/info.json", info)) { sendErr(r, 500, "Couldn't start the upload on the card."); return true; }
-    sendJson(r, 200, "{\"uploadId\":\"" + id + "\",\"name\":\"" + jsonEsc(name) + "\",\"receivedBytes\":0}");
+    sendJson(r, 200, "{\"uploadId\":\"" + id + "\",\"name\":\"" + jsonEsc(name) + "\",\"receivedBytes\":0,\"chunkSize\":" + BIG_CHUNK + "}");
     return true;
   }
 
@@ -314,20 +322,22 @@ bool handleBigfilesApi(AsyncWebServerRequest* r, const String& url, WebRequestMe
   }
   uint64_t size = info["size"] | (uint64_t)0;
   String name = String((const char*)(info["name"] | "file"));
+  bool cancel = m == HTTP_DELETE && url == "/api/bigfiles/" + id;
+  if (!cancel && !upOpen(id)) { sendErr(r, 500, "Couldn't read the upload's progress on the card."); return true; }
 
   if (url.endsWith("/status") && m == HTTP_GET) {
-    sendJson(r, 200, "{\"receivedBytes\":" + num(partsOf(dir).bytes) + ",\"size\":" + num(size) + ",\"name\":\"" + jsonEsc(name) + "\"}");
+    sendJson(r, 200, "{\"receivedBytes\":" + num(prefixBytes()) + ",\"size\":" + num(size) + ",\"name\":\"" + jsonEsc(name) + "\"}");
     return true;
   }
 
   if (url.endsWith("/chunk") && m == HTTP_POST) {
     BigCtx* c = bigCtx(r);
-    uint64_t have = partsOf(dir).bytes;
+    uint64_t have = prefixBytes();
     if (!c) { sendJson(r, 200, "{\"receivedBytes\":" + num(have) + "}"); return true; }   // an empty chunk
     switch (c->code) {
       case 0:   sendJson(r, 200, "{\"receivedBytes\":" + num(have) + "}"); break;
       case 409: sendJson(r, 409, "{\"error\":\"Offset mismatch.\",\"receivedBytes\":" + num(have) + "}"); break;
-      case 400: sendErr(r, 400, "That chunk goes past the end of the file."); break;
+      case 400: sendErr(r, 400, "That chunk isn't a whole 1 MB piece of the file. Reload the page and drop the file in again."); break;
       case 403: sendErr(r, 403, "The board is read-only right now."); break;
       case 507: sendErr(r, 507, "The card is full."); break;
       default:  sendJson(r, 500, "{\"error\":\"Could not write to the card.\",\"receivedBytes\":" + num(have) + "}"); break;
@@ -336,11 +346,15 @@ bool handleBigfilesApi(AsyncWebServerRequest* r, const String& url, WebRequestMe
   }
 
   if (url.endsWith("/complete") && m == HTTP_POST) {
-    Parts p = partsOf(dir);
-    if (p.bytes != size) {
-      sendErr(r, 400, "Only " + humanSize(p.bytes) + " of " + humanSize(size) + " has arrived so far -- keep uploading before completing.");
+    uint64_t have = prefixBytes();
+    if (have != size) {
+      sendErr(r, 400, "Only " + humanSize(have) + " of " + humanSize(size) + " has arrived so far -- keep uploading before completing.");
       return true;
     }
+    upClose();                                            // let go of the pieces before moving them
+    store->remove(dir + "/done");
+    Parts p = partsOf(dir);
+    if (p.bytes != size) { sendErr(r, 500, "The pieces on the card don't add up to the file's size. Cancel and send it again."); return true; }
     mkdirs(BIG_ROOT);
     String fin = bigUnique(name);
     bool ok;
@@ -357,7 +371,8 @@ bool handleBigfilesApi(AsyncWebServerRequest* r, const String& url, WebRequestMe
     return true;
   }
 
-  if (m == HTTP_DELETE && url == "/api/bigfiles/" + id) {
+  if (cancel) {
+    if (upId == id) upClose();
     removeAll(dir);
     statsDirty = true;
     sendJson(r, 200, "{\"cancelled\":true}");

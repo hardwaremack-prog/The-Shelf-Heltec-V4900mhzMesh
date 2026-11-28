@@ -42,6 +42,9 @@ if [ -d "$CORE/tools/xtensa-esp32s3-elf" ]; then   # core installed by hand rath
              --build-property "runtime.tools.xtensa-esp32-elf-gcc.path=$CORE/tools/xtensa-esp32-elf")
   command -v ctags >/dev/null && TOOLPROPS+=(--build-property "runtime.tools.ctags.path=$(dirname "$(command -v ctags)")")
 fi
+# the core's prebuilt SDK (for the V4 MMC's fast network swap)
+SDKDIR="$CORE/tools/sdk/esp32s3"
+[ -d "$SDKDIR" ] || SDKDIR="$(ls -d "$HOME"/.arduino15/packages/esp32/hardware/esp32/2.0.17/tools/sdk/esp32s3 2>/dev/null | head -1)"
 ESPTOOL="esptool.py"
 [ -f "$CORE/tools/esptool/esptool.py" ] && ESPTOOL="python3 $CORE/tools/esptool/esptool.py"
 
@@ -57,7 +60,17 @@ build() {   # name psram-option flash-size partitions app-size www-offset extra-
   local ld=""   # Heltec V4 MMC: the card's sector reads/writes go through sd_mmc_activity.cpp (status light)
   [[ "$defs" == *SHELF_MMC* ]] && ld="-Wl,--wrap=sdmmc_read_sectors -Wl,--wrap=sdmmc_write_sectors"
   cp "partitions/$parts" ShelfV4/partitions.csv
-  arduino-cli compile \
+  # V4 MMC: the fast network library and its sdkconfig.h go into the core for this build only
+  local swap=""
+  if [[ "$defs" == *SHELF_MMC* && -f fastnet/liblwip.a ]]; then
+    swap="$SDKDIR"
+    cp "$SDKDIR/lib/liblwip.a" build/liblwip.stock.a
+    cp "$SDKDIR/qio_qspi/include/sdkconfig.h" build/sdkconfig.stock.h
+    trap 'cp build/liblwip.stock.a "$SDKDIR/lib/liblwip.a"; cp build/sdkconfig.stock.h "$SDKDIR/qio_qspi/include/sdkconfig.h"' EXIT
+    cp fastnet/liblwip.a "$SDKDIR/lib/liblwip.a"
+    cp fastnet/sdkconfig.h "$SDKDIR/qio_qspi/include/sdkconfig.h"
+  fi
+  arduino-cli compile --clean \
     --fqbn "$fqbn" \
     --build-property "compiler.c.elf.extra_flags=$ld" \
     --build-property "compiler.cpp.extra_flags=-DCONFIG_ASYNC_TCP_RUNNING_CORE=0 -DCONFIG_ASYNC_TCP_STACK_SIZE=16384 -DCONFIG_ASYNC_TCP_QUEUE_SIZE=256 $defs" \
@@ -65,6 +78,9 @@ build() {   # name psram-option flash-size partitions app-size www-offset extra-
     --library "$PWD/libraries/SD" --library "$PWD/libraries/AsyncTCP" \
     ${TOOLPROPS[@]+"${TOOLPROPS[@]}"} --build-path "$bd" ShelfV4
   rm -f ShelfV4/partitions.csv
+  if [[ -n "$swap" ]]; then
+    cp build/liblwip.stock.a "$SDKDIR/lib/liblwip.a"; cp build/sdkconfig.stock.h "$SDKDIR/qio_qspi/include/sdkconfig.h"; trap - EXIT
+  fi
   local extra=()
   if [[ "$defs" == *SHELF_ESP32* ]]; then   # its update loader goes in the second app slot (see ShelfLoader/)
     cp "partitions/$parts" ShelfLoader/partitions.csv

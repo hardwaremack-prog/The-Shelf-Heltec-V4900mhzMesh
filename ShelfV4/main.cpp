@@ -585,7 +585,7 @@ bool handleBoardApi(AsyncWebServerRequest* r, const String& url, WebRequestMetho
       ",\"setup\":" + (firstSetup ? "true" : "false") + ",\"homeSsid\":\"" + jsonEsc(wifiSSID) + "\",\"homeIp\":\"" + prefs.getString("homeip", "") + "\",\"apOpen\":" + (ownPass.length() >= 8 ? "false" : "true") + ",\"apPass\":\"" + jsonEsc(ownPass) + "\"" +
       ",\"clients\":" + (apActive ? WiFi.softAPgetStationNum() : 0) + ",\"timeSet\":" + (time(nullptr) > 1700000000 ? "true" : "false") + ",\"tz\":" + tzMin + ",\"scrSleep\":" + (scrAutoSleep ? "true" : "false") + ",\"pwrSave\":" + (pwrSave ? "true" : "false") + ",\"cpuMhz\":" + getCpuFrequencyMhz() + ",\"temp\":" + String(temperatureRead(), 1) +
       ",\"uptime\":" + (millis() / 1000) +
-      ",\"sdPins\":\"" + String(sdOnAlt ? "CS 4, MISO 6, CLK 47, MOSI 48" : SD_PINS) + "\",\"sdMode\":\"" + String(sdMode) + "\",\"gps\":" + (gpsAvailable() ? "true" : "false") + ",\"sdRetries\":" + String(sdRetries) + ",\"sdFailures\":" + String(sdFailures) + ",\"heap\":" + ESP.getFreeHeap() + ",\"maxBlock\":" + ESP.getMaxAllocHeap() + ",\"minHeap\":" + ESP.getMinFreeHeap() + ",\"psram\":" + ESP.getPsramSize() +
+      ",\"sdPins\":\"" + String(sdOnAlt ? "CS 4, MISO 6, CLK 47, MOSI 48" : SD_PINS) + "\",\"sdMode\":\"" + String(sdMode) + "\",\"tcpWnd\":" + String((unsigned)CONFIG_LWIP_TCP_WND_DEFAULT) + ",\"gps\":" + (gpsAvailable() ? "true" : "false") + ",\"sdRetries\":" + String(sdRetries) + ",\"sdFailures\":" + String(sdFailures) + ",\"heap\":" + ESP.getFreeHeap() + ",\"maxBlock\":" + ESP.getMaxAllocHeap() + ",\"minHeap\":" + ESP.getMinFreeHeap() + ",\"psram\":" + ESP.getPsramSize() +
       ",\"mem\":{\"coms\":" + (mem.coms ? "true" : "false") + ",\"find\":" + (mem.find ? "true" : "false") + ",\"screen\":" + (mem.screen ? "true" : "false") +
       ",\"wx\":" + (mem.wx ? "true" : "false") + ",\"news\":" + (mem.news ? "true" : "false") + ",\"tags\":" + (mem.tags ? "true" : "false") + ",\"mdns\":" + (mem.mdns ? "true" : "false") + "}}";
     sendJson(r, 200, s); return true;
@@ -910,6 +910,13 @@ static void memoryWait() {
 void setup() {
   Serial.begin(115200);
   Serial.printf("\n[shelf] The Shelf %s for %s starting\n", FW_VERSION, BOARD_NAME);
+#if defined(SHELF_FASTNET)
+  // V4 MMC fast network (fastnet/): use the Wi-Fi buffer counts from its sdkconfig.h. Without
+  // this, Arduino swaps in its own fixed counts (4 static + 32 dynamic RX) when Wi-Fi starts.
+  WiFi.useStaticBuffers(true);
+  Serial.printf("[shelf] fast network: TCP window %u, send buffer %u, Wi-Fi RX %u+%u\n", (unsigned)CONFIG_LWIP_TCP_WND_DEFAULT,
+                (unsigned)CONFIG_LWIP_TCP_SND_BUF_DEFAULT, (unsigned)CONFIG_ESP32_WIFI_STATIC_RX_BUFFER_NUM, (unsigned)CONFIG_ESP32_WIFI_DYNAMIC_RX_BUFFER_NUM);
+#endif
   std::set_new_handler(memoryWait);
   oledLock = xSemaphoreCreateRecursiveMutex();
   gpio_deep_sleep_hold_dis();                 // let go of pins held through a power-off

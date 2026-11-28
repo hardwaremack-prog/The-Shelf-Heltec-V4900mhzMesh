@@ -317,6 +317,7 @@ async function load(){try{I=await fetch('/api/board/info').then(r=>r.json())}cat
   if(I.storage==='microSD card')$('#cardSec').style.display='block';
   const up=I.uptime>86400?Math.floor(I.uptime/86400)+'d '+Math.floor(I.uptime%86400/3600)+'h':Math.floor(I.uptime/3600)+'h '+Math.floor(I.uptime%3600/60)+'m';
   const rows=[['Board',I.board+(I.psram?' · '+Math.round(I.psram/1048576)+' MB PSRAM':'')],['Firmware','v'+I.fw],['Storage',I.storage+' · '+fmt(I.total)],['Free',fmt(I.total-I.used)],['Address',I.ip],['Name',I.host+'.local'],['Up for',up]];
+  if(I.tcpWnd)rows.push(['Network buffers',I.tcpWnd>6000?'fast: '+Math.round(I.tcpWnd/1024)+' KB per connection (V4 MMC build)':'standard: '+Math.round(I.tcpWnd/1024)+' KB per connection']);
   if(I.sdMode)rows.push(['Card speed',I.sdMode+(I.sdMode.indexOf('40 MHz')>=0?' (full speed)':I.sdMode.indexOf('1-bit')===0?' (check the D1, D2, D3 wires)':' (fell back: check the wires are short and soldered well)')]);
   if(I.storage==='microSD card')rows.push(['Card writes',(I.sdFailures?I.sdFailures+' failed · ':'')+(I.sdRetries?I.sdRetries+' needed a retry':'all clean')+' since restart']);
   $('#info').innerHTML=rows.map(r=>`<div class="kv"><span>${r[0]}</span><span>${esc(r[1])}</span></div>`).join('');

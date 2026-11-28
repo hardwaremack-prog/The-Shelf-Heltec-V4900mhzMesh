@@ -2,7 +2,7 @@
 
 A small Windows app that **saves a whole SD card to one image file**, **writes an image back onto a card**, and **grows a card to its full size** after you've copied a small card onto a bigger one.
 
-It's fast because it skips a card's empty space instead of copying every byte.
+It's fast 🏎️ because it skips a card's empty space instead of copying every byte.
 
 Windows 10 or 11. Nothing to install: it's one PowerShell script and a launcher.
 
@@ -19,7 +19,8 @@ Windows 10 or 11. Nothing to install: it's one PowerShell script and a launcher.
 - **The Shelf's microSD card**: back up the board's card (music, pictures, files) or move it to a bigger card.
 - **Keeping spare copies**: compressed images are small, so you can keep several versions.
 
-## Why it's fast
+<a id="why-its-fast"></a>
+## Why it's fast 🏎️
 
 Most card imagers copy **every byte** of the card, even the parts that hold nothing. A 32 GB card with 3 GB of files still takes as long as a full one, and the image file is a full 32 GB.
 

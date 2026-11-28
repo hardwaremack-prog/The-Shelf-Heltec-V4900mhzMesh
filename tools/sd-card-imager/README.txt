@@ -28,7 +28,23 @@ Write an image onto a card
   3. When it's done, take the card out and put it back in.
   With Quick ticked, empty space is skipped on the new card too.
   The new card must be at least as big as the one the image came from.
-  (A bigger card works; the extra space just isn't used.)
+  A bigger card works: when the write finishes, the app offers to grow the
+  card so the extra space gets used (see below).
+
+Grow a card to its full size
+  After writing a 32 GB image onto a 128 GB card, the card still looks like
+  32 GB. Pick the card and click "Grow to fill card..." (the app also offers
+  this by itself right after a write).
+  - FAT32 cards: the partition and the file system both grow; your files stay
+    where they are. Takes about a minute. Keep the image until you've checked
+    the card, just in case.
+  - Raspberry Pi cards: the Linux partition grows. Windows can't change the
+    files inside it, so boot the Pi from the card once and run, in a Terminal:
+        sudo resize2fs /dev/mmcblk0p2
+    It takes a few seconds and needs no reboot. (Or use raspi-config >
+    Advanced Options > Expand Filesystem.)
+  - NTFS cards grow with Windows' own resize.
+  exFAT and GPT cards aren't grown (the app says so and changes nothing).
 
 Only SD cards and USB drives are listed, never the computer's own disks.
 "Stop" ends a save (the unfinished file is deleted) or a write (the card is

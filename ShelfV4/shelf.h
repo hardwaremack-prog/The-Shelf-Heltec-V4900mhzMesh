@@ -165,6 +165,13 @@ bool handleOtaApi(AsyncWebServerRequest* r, const String& url, WebRequestMethod 
 bool isSpeedUpload(const String& url);
 void speedBody(AsyncWebServerRequest* r, uint8_t* data, size_t len, size_t index, size_t total);
 bool handleSpeedTestApi(AsyncWebServerRequest* r, const String& url, WebRequestMethod m);
+// cardpipe.cpp (V4 MMC): saving to the card on a task of its own, so Wi-Fi never waits on it
+#define PIPE_BIG   0
+#define PIPE_SPEED 1
+int  pipeOpen(uint8_t target, const char* id, uint64_t off);   // a slot, or -1 (then write directly)
+bool pipeFeed(int slot, const uint8_t* data, size_t len);
+bool pipeEnd(int slot, bool markDone, uint64_t chunkOff);
+bool pipeFinish(int slot, uint32_t timeoutMs);                  // waits for its blocks; frees the slot
 // bigfiles.cpp: Big Transfer (Heltec V4 MMC only; elsewhere these do nothing)
 bool isBigChunk(const String& url);
 void bigBody(AsyncWebServerRequest* r, uint8_t* data, size_t len, size_t index, size_t total);

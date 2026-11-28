@@ -95,18 +95,18 @@ if big_files:
         if a not in app:
             sys.exit("pack_www: Big Transfer code in app.js changed -- update the V4MMC patches (" + a[:50] + "...)")
         app = app.replace(a, b, 1)
-    # the upload loop: three chunks at a time (see bigUploadLanes below)
+    # the upload loop: four chunks at a time (see bigUploadLanes below)
     app, n = re.subn(r"\nasync function uploadBigfileChunks\(\) \{\n.*?\n\}\n",
                      "\nasync function uploadBigfileChunks() { return bigUploadLanes(); }\n", app, count=1, flags=re.S)
     if n != 1:
         sys.exit("pack_www: couldn't find uploadBigfileChunks in app.js -- update the V4MMC patches")
     app += r"""
 
-// ---- Heltec V4 MMC: Big Transfer, three chunks at a time, with live progress, speed and time left.
+// ---- Heltec V4 MMC: Big Transfer, four chunks at a time, with live progress, speed and time left.
 // The board only lets ~6 KB be in flight per connection, so one connection tops out around
 // 6 Mbps; three connections side by side get round that. The board writes each chunk straight
 // into its place in the file, whatever order they arrive in.
-const BIG_LANES = 3;
+const BIG_LANES = 4;
 async function bigUploadLanes() {
   const u = bigfileUpload;
   if (!u || u.running) return;

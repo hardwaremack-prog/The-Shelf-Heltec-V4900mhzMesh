@@ -30,6 +30,7 @@ struct BigCtx {               // one chunk being written (internal, DMA-capable 
   size_t got;                 // bytes of it written so far
   size_t fill;                // bytes waiting in buf
   char id[17];
+  int8_t slot;                // card writer slot (cardpipe.cpp), or -1: written right here
   alignas(4) uint8_t buf[UPLOAD_BUF];
 };
 
@@ -45,6 +46,13 @@ static int32_t upPart = -1;
 static File upDoneF;                   // one byte per chunk: 1 = on the card
 static std::vector<uint8_t> upDone;
 static uint32_t upFirstGap = 0;        // chunks before this are all done
+// The card writer task (cardpipe.cpp) writes through these handles too: everything that
+// touches them holds this lock.
+static SemaphoreHandle_t upMux = nullptr;
+struct UpLock {
+  UpLock() { if (!upMux) upMux = xSemaphoreCreateRecursiveMutex(); xSemaphoreTakeRecursive(upMux, portMAX_DELAY); }
+  ~UpLock() { xSemaphoreGiveRecursive(upMux); }
+};
 
 static BigCtx* bigCtx(AsyncWebServerRequest* r) {
   BigCtx* c = (BigCtx*)r->_tempObject;
@@ -153,7 +161,20 @@ static bool upMarkDone(uint64_t off) {
   return ok;
 }
 
-// A chunk's bytes, as they arrive: 16 KB at a time into its place in the file.
+// For the card writer task
+bool bigPipeWrite(const char* id, uint64_t off, const uint8_t* buf, size_t n) {
+  UpLock l;
+  return (upId == id || upOpen(id)) && upWrite(off, buf, n);
+}
+bool bigPipeMark(const char* id, uint64_t off) {
+  UpLock l;
+  bool ok = (upId == id || upOpen(id)) && upMarkDone(off);
+  statsDirty = true;
+  return ok;
+}
+
+// A chunk's bytes, as they arrive: handed to the card writer (or, without one, 16 KB at a
+// time straight into its place in the file).
 void bigBody(AsyncWebServerRequest* r, uint8_t* data, size_t len, size_t index, size_t total) {
   if (index == 0) {
     if (r->_tempObject) return;
@@ -161,11 +182,12 @@ void bigBody(AsyncWebServerRequest* r, uint8_t* data, size_t len, size_t index, 
     if (!c) c = (BigCtx*)malloc(sizeof(BigCtx));
     if (!c) return;
     memset(c, 0, offsetof(BigCtx, buf));
-    c->magic = BIG_MAGIC;
+    c->magic = BIG_MAGIC; c->slot = -1;
     r->_tempObject = c;
     if (r->client()) r->client()->setRxTimeout(30);
     if (!canWrite(r)) { c->code = 403; return; }
     String id = idOf(r->url());
+    UpLock l;
     if (!id.length() || !upOpen(id)) { c->code = 404; return; }
     strlcpy(c->id, id.c_str(), sizeof c->id);
     uint64_t off = r->hasParam("offset") ? strtoull(r->getParam("offset")->value().c_str(), nullptr, 10) : UINT64_MAX;
@@ -173,9 +195,16 @@ void bigBody(AsyncWebServerRequest* r, uint8_t* data, size_t len, size_t index, 
     if (off >= upSize || off % BIG_CHUNK || total != (size_t)std::min((uint64_t)BIG_CHUNK, upSize - off)) { c->code = 400; return; }
     if (storeTotal && storeTotal - storeUsed < (uint64_t)total + 4 * 1024 * 1024) { c->code = 507; return; }
     c->off = off;
+    c->slot = (int8_t)pipeOpen(PIPE_BIG, c->id, off);
   }
   BigCtx* c = bigCtx(r);
   if (!c || c->code) return;
+  if (c->slot >= 0) {                                        // the card writer saves it
+    if (!pipeFeed(c->slot, data, len)) { c->code = 500; return; }
+    if (index + len >= total && !pipeEnd(c->slot, true, c->off)) c->code = 500;
+    return;
+  }
+  UpLock l;
   if (upId != c->id && !upOpen(c->id)) { c->code = 404; return; }   // (another upload took the handles meanwhile)
   size_t n0 = len;
   while (len) {
@@ -247,6 +276,15 @@ bool handleBigfilesApi(AsyncWebServerRequest* r, const String& url, WebRequestMe
     return true;
   }
   if (url != "/api/bigfiles" && !url.startsWith("/api/bigfiles/")) return false;
+  if (url.endsWith("/chunk") && m == HTTP_POST) {            // wait for the chunk to be on the card (no lock: the writer needs it)
+    BigCtx* c = bigCtx(r);
+    if (c && c->slot >= 0) {
+      bool ok = pipeFinish(c->slot, 20000);
+      c->slot = -1;
+      if (!ok && !c->code) c->code = 500;
+    }
+  }
+  UpLock lock;
   if (!onSD) {
     if (url == "/api/bigfiles" && m == HTTP_GET) { sendJson(r, 200, "[]"); return true; }
     sendErr(r, 400, "Big Transfer needs the microSD card, and none was found."); return true;

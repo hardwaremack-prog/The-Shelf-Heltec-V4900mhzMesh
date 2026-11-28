@@ -284,8 +284,8 @@ async function speedTest(){
   const down=async()=>{const t0=performance.now();const r=await fetch('/api/board/speedtest/down?bytes='+6*MB,{cache:'no-store'});if(!r.ok)throw new Error('The board said no ('+r.status+')');
     const b=await r.arrayBuffer();return b.byteLength/((performance.now()-t0)/1000)};
   const R={};
-  const tests=[['in1','Wi-Fi to board, 1 connection',()=>up(1,false,6)],['in3','Wi-Fi to board, 3 at once',()=>up(3,false,6)]];
-  if(card)tests.push(['save3','Wi-Fi to board + saving to card, 3 at once',()=>up(3,true,6)]);
+  const tests=[['in1','Wi-Fi to board, 1 connection',()=>up(1,false,6)],['in3','Wi-Fi to board, 3 at once',()=>up(3,false,6)],['in4','Wi-Fi to board, 4 at once',()=>up(4,false,8)]];
+  if(card)tests.push(['save4','Wi-Fi to board + saving to card, 4 at once',()=>up(4,true,8)]);
   tests.push(['out','Board to Wi-Fi (downloads)',down]);
   let cardRes=null;
   try{
@@ -295,11 +295,12 @@ async function speedTest(){
       cardRes=j;const w=j.bytes/Math.max(1,j.writeMs)*1000,rd=j.bytes/Math.max(1,j.readMs)*1000;
       rows[rows.length-1][1]='saves '+(w/MB).toFixed(1)+' MB/s · reads '+(rd/MB).toFixed(1)+' MB/s';show();R.cardW=w}
   }catch(e){if(rows.length)rows[rows.length-1][1]='failed';show();msg.className='msg err';msg.textContent=e.message;btn.disabled=false;return}
-  const say=[];
-  if(R.in3>R.in1*1.25)say.push('More connections help, so Big Transfer sending several pieces at once is worth it.');
-  else say.push('More connections don\'t help: the Wi-Fi itself tops out around '+(R.in1*8/1e6).toFixed(0)+' Mbps here.');
-  if(R.save3){if(R.save3<R.in3*0.8)say.push('Saving to the card slows uploads down ('+(R.save3*8/1e6).toFixed(1)+' vs '+(R.in3*8/1e6).toFixed(1)+' Mbps without it).');
-    else say.push('The card keeps up: it saves far faster than the Wi-Fi brings data in, so the Wi-Fi sets the speed.')}
+  const say=[],M=b=>(b*8/1e6).toFixed(1),best=Math.max(R.in3,R.in4);
+  const gain=Math.round((best/R.in1-1)*100);
+  if(gain>=8)say.push('Several connections at once are '+gain+'% faster than one ('+M(best)+' vs '+M(R.in1)+' Mbps)'+(R.in4>R.in3*1.05?', and 4 beat 3.':'.'));
+  else say.push('More connections barely help: the Wi-Fi itself tops out around '+M(best)+' Mbps here.');
+  if(R.save4){if(R.save4<R.in4*0.9)say.push('Saving to the card still costs some speed ('+M(R.save4)+' vs '+M(R.in4)+' Mbps without it).');
+    else say.push('Saving to the card costs almost nothing ('+M(R.save4)+' vs '+M(R.in4)+' Mbps): the Wi-Fi sets the speed.')}
   msg.textContent=say.join(' ');btn.disabled=false}
 async function post(u,d){const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d||{})});let j={};try{j=await r.json()}catch(e){}if(!r.ok)throw new Error(j.error||'Something went wrong');return j}
 async function load(){try{I=await fetch('/api/board/info').then(r=>r.json())}catch(e){return}

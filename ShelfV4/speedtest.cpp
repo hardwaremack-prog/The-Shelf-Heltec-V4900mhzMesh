@@ -18,7 +18,7 @@ struct SpeedCtx {             // the request frees it with free()
   bool save, err;
   uint32_t t0, t1;            // first and last byte, ms
   size_t got, fill;
-  uint32_t synced;
+  int8_t slot;                // V4 MMC: card writer slot (the same way Big Transfer saves)
   char path[48];
   alignas(4) uint8_t buf[UPLOAD_BUF];
 };
@@ -36,11 +36,14 @@ void speedBody(AsyncWebServerRequest* r, uint8_t* data, size_t len, size_t index
     SpeedCtx* c = (SpeedCtx*)(save ? cardBufAlloc(sizeof(SpeedCtx)) : malloc(offsetof(SpeedCtx, buf)));
     if (!c) return;
     memset(c, 0, offsetof(SpeedCtx, buf));
-    c->magic = SPEED_MAGIC; c->save = save; c->t0 = millis();
+    c->magic = SPEED_MAGIC; c->save = save; c->t0 = millis(); c->slot = -1;
     r->_tempObject = c;
     if (r->client()) r->client()->setRxTimeout(30);
     if (total > SPEED_MAX) { c->err = true; return; }
-    if (save) {
+#if defined(SHELF_MMC)
+    if (save) c->slot = (int8_t)pipeOpen(PIPE_SPEED, "", 0);
+#endif
+    if (save && c->slot < 0) {
       mkdirs(SPEED_DIR);
       snprintf(c->path, sizeof c->path, SPEED_DIR "/s%08x", (unsigned)esp_random());
       r->_tempFile = store->open(c->path, FILE_WRITE);
@@ -50,6 +53,14 @@ void speedBody(AsyncWebServerRequest* r, uint8_t* data, size_t len, size_t index
   SpeedCtx* c = speedCtx(r);
   if (!c || c->err) return;
   c->got += len;
+#if defined(SHELF_MMC)
+  if (c->slot >= 0) {
+    if (!pipeFeed(c->slot, data, len)) c->err = true;
+    else if (index + len >= total) pipeEnd(c->slot, false, 0);
+    c->t1 = millis();
+    return;
+  }
+#endif
   if (c->save) {
     size_t n0 = len;
     while (len) {
@@ -75,6 +86,12 @@ bool handleSpeedTestApi(AsyncWebServerRequest* r, const String& url, WebRequestM
   if (url == "/api/board/speedtest/up" && m == HTTP_POST) {
     SpeedCtx* c = speedCtx(r);
     if (!c) { sendJson(r, 200, "{\"bytes\":0,\"ms\":0}"); return true; }
+#if defined(SHELF_MMC)
+    if (c->slot >= 0) {                                  // on the card before answering, as Big Transfer does
+      if (!pipeFinish(c->slot, 20000)) c->err = true;
+      c->slot = -1; c->t1 = millis();
+    }
+#endif
     if (c->err) {
       if (c->path[0]) store->remove(c->path);
       sendErr(r, 500, c->got > SPEED_MAX ? "Too big for one speed test piece." : "Couldn't write the test file to the card.");

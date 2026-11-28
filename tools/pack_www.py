@@ -106,7 +106,9 @@ if big_files:
 // The board only lets ~6 KB be in flight per connection, so one connection tops out around
 // 6 Mbps; three connections side by side get round that. The board writes each chunk straight
 // into its place in the file, whatever order they arrive in.
-const BIG_LANES = 4;
+const BIG_LANES = 1;   // 1.21 fast network: one connection is the fastest (speed test 11.1 vs 10.1 Mbps with 4), and
+                      // pieces arriving in order mean the board never seeks backwards in the file: a backwards seek
+                      // makes FAT walk the file's cluster chain from the start, slower the bigger the file gets
 async function bigUploadLanes() {
   const u = bigfileUpload;
   if (!u || u.running) return;

@@ -140,8 +140,10 @@ static bool upWrite(uint64_t off, const uint8_t* buf, size_t n) {
       upF = store->open(path, store->exists(path) ? "r+" : "w+");
       upPart = upF ? part : -1;
     }
-    // seeking past the end makes the file longer; the gap is filled by the chunks still coming
-    if (upF && upF.seek(at) && upF.write(buf, n) == n) return true;
+    // Only seek when not already there: in order (one chunk at a time) every block follows the
+    // last, and a backwards seek makes FAT walk the file's cluster chain from its start.
+    // Seeking past the end makes the file longer; the gap is filled by the chunks still coming.
+    if (upF && (upF.position() == at || upF.seek(at)) && upF.write(buf, n) == n) return true;
     if (upF) upF.close();
     upPart = -1;
     sdRetries++;

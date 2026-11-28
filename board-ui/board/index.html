@@ -72,7 +72,7 @@ label.l{font-size:13px;color:var(--muted)}
   <h2>This board</h2>
   <div class="card" id="info"><div class="empty">Loading&hellip;</div></div>
   <h2>Speed test</h2>
-  <p class="tip">Finds what sets the speed of a big upload: the Wi-Fi or the microSD card. It sends test data to the board and back (about 50&nbsp;MB, a minute or so; Wi-Fi speeds wander, so run it twice to compare) and tests the card on its own. Nothing is kept.</p>
+  <p class="tip">Finds what sets the speed of a big upload: the Wi-Fi or the microSD card. It sends test data to the board and back (about 80&nbsp;MB, a minute or two; Wi-Fi speeds wander, so run it twice to compare) and tests the card on its own. Nothing is kept.</p>
   <div class="card" id="speedRes" style="display:none"></div>
   <div class="btns"><button class="pri" id="speedBtn" onclick="speedTest()">Run speed test</button></div>
   <div class="msg" id="speedMsg"></div>
@@ -271,6 +271,7 @@ function memRender(){if(I.board!=='ESP32'||!I.mem)return;$('#memSec').style.disp
 async function memSave(){const d={};document.querySelectorAll('#memList input').forEach(c=>d[c.dataset.k]=c.checked);
   try{await post('/api/board/memory',d);$('#memMsg').className='msg';$('#memMsg').textContent='Saved. Restarting…';$('#memSaveBtn').disabled=true;await post('/api/board/reboot',{}).catch(()=>{});memDirty=false;setTimeout(load,12000)}
   catch(e){$('#memMsg').textContent=e.message;$('#memMsg').className='msg err'}}
+const BIG_LANES_BOARD=1;   // keep in step with BIG_LANES in tools/pack_www.py (V4 MMC)
 async function speedTest(){
   const btn=$('#speedBtn'),box=$('#speedRes'),msg=$('#speedMsg');btn.disabled=true;box.style.display='block';msg.textContent='';msg.className='msg';
   const rows=[],show=()=>box.innerHTML=rows.map(r=>`<div class="kv"><span>${r[0]}</span><span>${r[1]}</span></div>`).join('');
@@ -284,8 +285,9 @@ async function speedTest(){
   const down=async()=>{const t0=performance.now();const r=await fetch('/api/board/speedtest/down?bytes='+6*MB,{cache:'no-store'});if(!r.ok)throw new Error('The board said no ('+r.status+')');
     const b=await r.arrayBuffer();return b.byteLength/((performance.now()-t0)/1000)};
   const R={};
-  const tests=[['in1','Wi-Fi to board, 1 connection',()=>up(1,false,8)],['in3','Wi-Fi to board, 3 at once',()=>up(3,false,12)],['in4','Wi-Fi to board, 4 at once',()=>up(4,false,12)]];
+  const tests=[['in1','Wi-Fi to board, 1 connection',()=>up(1,false,12)],['in2','Wi-Fi to board, 2 at once',()=>up(2,false,12)],['in4','Wi-Fi to board, 4 at once',()=>up(4,false,12)]];
   let pipe=null;
+  if(card){tests.push(['save1','Wi-Fi to board + saving to card, 1 connection',()=>up(1,true,12)]);tests.push(['save2','Wi-Fi to board + saving to card, 2 at once',()=>up(2,true,12)])}
   if(card)tests.push(['save4','Wi-Fi to board + saving to card, 4 at once',async()=>{
     await fetch('/api/board/speedtest/pipe',{method:'POST'}).catch(()=>{});
     const v=await up(4,true,12);
@@ -305,12 +307,14 @@ async function speedTest(){
         ?`on (${pipe.poolBlocks} × ${pipe.blockKB||16} KB buffers in ${pipe.pool==='internal'?'fast internal RAM':'PSRAM'}; ${Math.round((pipe.dmaFreeAtStart||0)/1024)} KB fast RAM was free) · ${pipe.blocks} blocks saved · card busy ${busy}% of the time · Wi-Fi side waited ${pipe.takeWaitMs} ms for free blocks and ${pipe.finishWaitMs} ms at piece ends · queue peaked at ${pipe.maxQueued}`
         :`off${pipe.failed?' (no room for its buffers: '+Math.round(pipe.freePsram/1024)+' KB PSRAM free)':''} · saving went the direct way`]);show()}
   }catch(e){if(rows.length)rows[rows.length-1][1]='failed';show();msg.className='msg err';msg.textContent=e.message;btn.disabled=false;return}
-  const say=[],M=b=>(b*8/1e6).toFixed(1),best=Math.max(R.in3,R.in4);
+  const say=[],M=b=>(b*8/1e6).toFixed(1),best=Math.max(R.in2,R.in4);
   const gain=Math.round((best/R.in1-1)*100);
-  if(gain>=8)say.push('Several connections at once are '+gain+'% faster than one ('+M(best)+' vs '+M(R.in1)+' Mbps)'+(R.in4>R.in3*1.05?', and 4 beat 3.':'.'));
-  else say.push('More connections barely help: the Wi-Fi itself tops out around '+M(best)+' Mbps here.');
-  if(R.save4){if(R.save4<R.in4*0.9)say.push('Saving to the card still costs some speed ('+M(R.save4)+' vs '+M(R.in4)+' Mbps without it).');
-    else say.push('Saving to the card costs almost nothing ('+M(R.save4)+' vs '+M(R.in4)+' Mbps): the Wi-Fi sets the speed.')}
+  if(gain>=8)say.push('Several connections at once are '+gain+'% faster than one ('+M(best)+' vs '+M(R.in1)+' Mbps).');
+  else say.push('More connections don\'t help: the Wi-Fi itself tops out around '+M(Math.max(best,R.in1))+' Mbps here.');
+  if(R.save4){const sv=[[1,R.save1],[2,R.save2],[4,R.save4]].sort((a,b)=>b[1]-a[1])[0],top=Math.max(R.in1,best);
+    say.push('With saving, '+sv[0]+(sv[0]===1?' connection':' at once')+' is fastest ('+M(sv[1])+' Mbps; Big Transfer uses '+BIG_LANES_BOARD+').');
+    if(sv[1]<top*0.9)say.push('Saving still costs some speed ('+M(sv[1])+' vs '+M(top)+' Mbps without it).');
+    else say.push('Saving costs almost nothing: the Wi-Fi sets the speed.')}
   msg.textContent=say.join(' ');btn.disabled=false}
 async function post(u,d){const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d||{})});let j={};try{j=await r.json()}catch(e){}if(!r.ok)throw new Error(j.error||'Something went wrong');return j}
 async function load(){try{I=await fetch('/api/board/info').then(r=>r.json())}catch(e){return}

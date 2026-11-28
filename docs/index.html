@@ -41,6 +41,11 @@ ul.ok{padding-left:20px;margin:0}ul.ok li{margin-bottom:6px}
 .fb-bar{height:8px;border-radius:999px;background:var(--divider);overflow:hidden;margin-bottom:8px}
 .fb-bar div{height:100%;width:0;background:var(--accent);transition:width .2s}
 .ver-pill{display:inline-block;margin:8px 0 0;padding:4px 12px;border-radius:999px;background:var(--surface);border:1px solid var(--divider);font-size:14px}.ver-pill b{color:var(--accent)}
+.con-out{height:360px;overflow:auto;margin:12px 0 0;padding:12px;background:#120d18;border:1px solid var(--divider);border-radius:14px;font:12.5px/1.45 ui-monospace,SFMono-Regular,Consolas,Menlo,monospace;color:#d8cfe0;white-space:pre-wrap;word-break:break-all}
+.con-out .t{color:#7d6f8c}.con-out .bad{color:#ff8f7a;font-weight:600}.con-out .good{color:#8fe3b0}.con-out .sys{color:var(--accent)}
+.con-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.btn.sec{background:transparent;color:var(--text);border:1px solid var(--divider)}
+.con-send{display:flex;gap:8px;margin-top:8px}.con-send input{flex:1;font:inherit;font-size:14px;background:var(--surface);color:var(--text);border:1px solid var(--divider);border-radius:999px;padding:9px 14px}
 </style>
 </head>
 <body>
@@ -198,6 +203,23 @@ ul.ok{padding-left:20px;margin:0}ul.ok li{margin-bottom:6px}
   </div>
 
 
+  <h2 id="console">Serial console</h2>
+  <p>See what the board prints over USB: start-up, which card mode it found, and the details if it ever crashes. Plug the board in with a USB <i>data</i> cable, click <b>Connect</b> and pick its port (Chrome or Edge). When the board restarts its USB drops for a moment; the console reconnects by itself. If it crashed, <b>Copy log</b> and send it over: the lines in red say where.</p>
+  <div class="card">
+    <div class="con-bar">
+      <button class="btn" id="conConnect">Connect</button>
+      <button class="btn sec" id="conReset" disabled>Restart board</button>
+      <button class="btn sec" id="conClear">Clear</button>
+      <button class="btn sec" id="conCopy">Copy log</button>
+      <button class="btn sec" id="conSave">Save log</button>
+      <label class="muted"><input type="checkbox" id="conTime" checked> Times</label>
+      <label class="muted"><input type="checkbox" id="conFollow" checked> Follow</label>
+      <span class="muted" id="conState">Not connected</span>
+    </div>
+    <div class="con-out" id="conOut"></div>
+    <div class="con-send"><input id="conLine" placeholder="Type to send to the board (Enter)" disabled></div>
+  </div>
+
   <h2>What's included</h2>
   <div class="grid">
     <div class="card"><h3>Everything that's yours</h3><ul class="ok muted">
@@ -328,6 +350,69 @@ function confirmRestore(name, n) {
 // which version the Install buttons put on the board (the same files Update firmware fetches)
 fetch('ota/shelf-v4.json',{cache:'no-store'}).then(r=>r.json()).then(j=>{const e=document.getElementById('verPill');
   e.innerHTML='This flasher installs <b>The Shelf '+j.version+'</b> (every board: V4, V4-R8, V4 MMC, V3 and ESP32)';e.hidden=false;}).catch(()=>{});
+</script>
+<script>
+// ---- Serial console (Web Serial). Reconnects by itself when the board restarts (a V4's USB is
+// the chip's own, so it drops out on every restart or crash).
+(function(){
+  const $=id=>document.getElementById(id), out=$('conOut'), state=$('conState');
+  const BAD=/Guru Meditation|panic|abort\(\)|Backtrace|assert failed|Brownout|Stack canary|LoadProhibited|StoreProhibited|IllegalInstruction|InstrFetchProhibited|watchdog|WDT|CORRUPT HEAP|out of memory|Exception/i;
+  const GOOD=/microSD found|card writer|starting|Wi-Fi|ready/i;
+  let port=null, reader=null, want=false, lines=[], partial='', keepPort=null;
+  const MAX=20000;
+  if(!('serial' in navigator)){ $('conConnect').disabled=true; state.textContent='Open this page in Chrome or Edge on a computer to use the console.'; return; }
+  function stamp(){const d=new Date();return d.toTimeString().slice(0,8)+'.'+String(d.getMilliseconds()).padStart(3,'0')}
+  function add(text,cls){
+    const line={t:stamp(),text,cls:cls||(BAD.test(text)?'bad':GOOD.test(text)?'good':'')};
+    lines.push(line); if(lines.length>MAX) lines.splice(0,lines.length-MAX);
+    const div=document.createElement('div'); if(line.cls) div.className=line.cls;
+    if($('conTime').checked){const s=document.createElement('span');s.className='t';s.textContent=line.t+'  ';div.appendChild(s)}
+    div.appendChild(document.createTextNode(text)); out.appendChild(div);
+    while(out.childNodes.length>3000) out.removeChild(out.firstChild);
+    if($('conFollow').checked) out.scrollTop=out.scrollHeight;
+  }
+  const sys=t=>add('— '+t+' —','sys');
+  function setState(t){state.textContent=t}
+  async function open(p){
+    try{ await p.open({baudRate:115200}); }catch(e){ if(!/already open/i.test(e.message)){ sys("Couldn't open the port: "+e.message+' (close other tabs or the Arduino Serial Monitor using it)'); return false } }
+    port=p; keepPort=p; $('conReset').disabled=false; $('conLine').disabled=false; $('conConnect').textContent='Disconnect';
+    setState('Connected'); sys('connected');
+    readLoop(p); return true;
+  }
+  async function readLoop(p){
+    const dec=new TextDecoder();
+    try{
+      while(p.readable && want){
+        reader=p.readable.getReader();
+        try{ for(;;){ const {value,done}=await reader.read(); if(done) break;
+          partial+=dec.decode(value,{stream:true});
+          let i; while((i=partial.search(/\r?\n/))>=0){ add(partial.slice(0,i)); partial=partial.slice(partial[i]==='\r'?i+2:i+1) } }
+        } finally { reader.releaseLock(); reader=null }
+      }
+    }catch(e){ /* the board went away */ }
+    if(partial){add(partial);partial=''}
+    try{ await p.close() }catch(e){}
+    if(port===p){ port=null; $('conReset').disabled=true; $('conLine').disabled=true;
+      if(want){ setState('Board restarting… waiting for it to come back'); sys('USB dropped (restart or crash): waiting to reconnect'); }
+      else { setState('Not connected'); $('conConnect').textContent='Connect' } }
+  }
+  // the same board coming back after a restart
+  navigator.serial.addEventListener('connect', async e=>{ if(want && !port){ await new Promise(r=>setTimeout(r,300)); open(e.target) } });
+  $('conConnect').onclick=async()=>{
+    if(port||want&&!port){ want=false; if(reader) try{await reader.cancel()}catch(e){} ; if(!port){setState('Not connected');$('conConnect').textContent='Connect'} return }
+    let p; try{ p=await navigator.serial.requestPort() }catch(e){ return }
+    want=true; open(p);
+  };
+  $('conReset').onclick=async()=>{ if(!port) return; sys('restarting the board');
+    try{ await port.setSignals({dataTerminalReady:false,requestToSend:true}); await new Promise(r=>setTimeout(r,120)); await port.setSignals({requestToSend:false}) }catch(e){ sys("Couldn't restart it from here: press RST on the board") } };
+  $('conClear').onclick=()=>{ out.innerHTML=''; lines=[] };
+  const text=()=>lines.map(l=>($('conTime').checked?l.t+'  ':'')+l.text).join('\n');
+  $('conCopy').onclick=async()=>{ try{ await navigator.clipboard.writeText(text()); sys('log copied') }catch(e){ sys("Couldn't copy: use Save log") } };
+  $('conSave').onclick=()=>{ const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([text()],{type:'text/plain'}));
+    a.download='shelf-console-'+new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')+'.txt'; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),5000) };
+  $('conLine').addEventListener('keydown',async e=>{ if(e.key!=='Enter'||!port||!port.writable) return;
+    const w=port.writable.getWriter(); try{ await w.write(new TextEncoder().encode(e.target.value+'\r\n')); add('> '+e.target.value,'sys'); e.target.value='' } finally { w.releaseLock() } });
+})();
 </script>
 </body>
 </html>

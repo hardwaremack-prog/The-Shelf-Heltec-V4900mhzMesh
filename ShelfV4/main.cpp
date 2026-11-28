@@ -310,6 +310,7 @@ static void drawStatusPage() {
 #include "screen_pages.h"
 
 // ------------------------------------------------------------ storage
+const char* sdMode = "";                   // V4 MMC: how the card came up ("4-bit, 40 MHz" ...)
 bool sdOnAlt = false;                       // the card is on the second layout (GNSS connector free)
 static void setupStorage() {
 #if defined(SHELF_MMC)
@@ -319,13 +320,14 @@ static void setupStorage() {
   SD_MMC.setPins(SD_MMC_CLK, SD_MMC_CMD, SD_MMC_D0, SD_MMC_D1, SD_MMC_D2, SD_MMC_D3);
   struct { bool oneBit; int khz; const char* what; } tries[] = {
     {false, SDMMC_FREQ_HIGHSPEED, "4-bit, 40 MHz"}, {false, SDMMC_FREQ_DEFAULT, "4-bit, 20 MHz"},
-    {true, SDMMC_FREQ_DEFAULT, "1-bit, 20 MHz (check the D1, D2, D3 wires)"}};
+    {true, SDMMC_FREQ_DEFAULT, "1-bit, 20 MHz"}};
   for (auto& t : tries) {
     // the card's lines need pull-ups; most readers have them, the ESP32's own back them up
     for (int pin : mmcPins) gpio_pullup_en((gpio_num_t)pin);
     if (SD_MMC.begin("/sd", t.oneBit, false, t.khz, 10) && SD_MMC.cardType() != CARD_NONE) {
       for (int pin : mmcPins) gpio_pullup_en((gpio_num_t)pin);
       onSD = true;
+      sdMode = t.what;                     // shown on the settings page
       Serial.printf("[shelf] microSD found on SD/MMC, %s\n", t.what);
       break;
     }
@@ -583,7 +585,7 @@ bool handleBoardApi(AsyncWebServerRequest* r, const String& url, WebRequestMetho
       ",\"setup\":" + (firstSetup ? "true" : "false") + ",\"homeSsid\":\"" + jsonEsc(wifiSSID) + "\",\"homeIp\":\"" + prefs.getString("homeip", "") + "\",\"apOpen\":" + (ownPass.length() >= 8 ? "false" : "true") + ",\"apPass\":\"" + jsonEsc(ownPass) + "\"" +
       ",\"clients\":" + (apActive ? WiFi.softAPgetStationNum() : 0) + ",\"timeSet\":" + (time(nullptr) > 1700000000 ? "true" : "false") + ",\"tz\":" + tzMin + ",\"scrSleep\":" + (scrAutoSleep ? "true" : "false") + ",\"pwrSave\":" + (pwrSave ? "true" : "false") + ",\"cpuMhz\":" + getCpuFrequencyMhz() + ",\"temp\":" + String(temperatureRead(), 1) +
       ",\"uptime\":" + (millis() / 1000) +
-      ",\"sdPins\":\"" + String(sdOnAlt ? "CS 4, MISO 6, CLK 47, MOSI 48" : SD_PINS) + "\",\"gps\":" + (gpsAvailable() ? "true" : "false") + ",\"sdRetries\":" + String(sdRetries) + ",\"sdFailures\":" + String(sdFailures) + ",\"heap\":" + ESP.getFreeHeap() + ",\"maxBlock\":" + ESP.getMaxAllocHeap() + ",\"minHeap\":" + ESP.getMinFreeHeap() + ",\"psram\":" + ESP.getPsramSize() +
+      ",\"sdPins\":\"" + String(sdOnAlt ? "CS 4, MISO 6, CLK 47, MOSI 48" : SD_PINS) + "\",\"sdMode\":\"" + String(sdMode) + "\",\"gps\":" + (gpsAvailable() ? "true" : "false") + ",\"sdRetries\":" + String(sdRetries) + ",\"sdFailures\":" + String(sdFailures) + ",\"heap\":" + ESP.getFreeHeap() + ",\"maxBlock\":" + ESP.getMaxAllocHeap() + ",\"minHeap\":" + ESP.getMinFreeHeap() + ",\"psram\":" + ESP.getPsramSize() +
       ",\"mem\":{\"coms\":" + (mem.coms ? "true" : "false") + ",\"find\":" + (mem.find ? "true" : "false") + ",\"screen\":" + (mem.screen ? "true" : "false") +
       ",\"wx\":" + (mem.wx ? "true" : "false") + ",\"news\":" + (mem.news ? "true" : "false") + ",\"tags\":" + (mem.tags ? "true" : "false") + ",\"mdns\":" + (mem.mdns ? "true" : "false") + "}}";
     sendJson(r, 200, s); return true;

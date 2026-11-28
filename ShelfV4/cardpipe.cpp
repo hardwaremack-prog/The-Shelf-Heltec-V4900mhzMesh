@@ -15,7 +15,10 @@
 #include <esp_heap_caps.h>
 #include <freertos/queue.h>
 
-#define PIPE_BLOCKS 40                 // 40 x 16 KB = 640 KB of PSRAM
+#define PIPE_BLOCKS 40                 // most blocks there can be (PSRAM pool: 40 x 16 KB = 640 KB)
+#define PIPE_FAST_MAX 12               // internal-RAM pool: up to 12 x 16 KB...
+#define PIPE_FAST_MIN 8                // ...and at least 8 (4 connections each filling one, plus a queue)
+#define PIPE_KEEP_FREE (48 * 1024)     // internal DMA memory left for Wi-Fi and everything else
 #define PIPE_SLOTS  8                  // requests writing at once
 #define SPEED_FILE  TMP_ROOT "/speed/pipe.bin"
 
@@ -38,6 +41,8 @@ static File speedF;                    // writer task only
 // What the speed test reports (reset at its start): did the writer run, and who waited on whom
 static volatile uint32_t stTakeWaitMs = 0, stFinishWaitMs = 0, stWriteMs = 0, stBlocks = 0, stMaxQueued = 0, stT0 = 0;
 static bool pipeFailed = false;
+static bool poolFast = false;          // blocks in internal RAM: the card's DMA reads them directly
+static int poolBlocks = 0;
 static volatile int speedActive = 0;
 
 bool bigPipeWrite(const char* id, uint64_t off, const uint8_t* buf, size_t n);   // bigfiles.cpp
@@ -53,8 +58,8 @@ static void writerTask(void*) {
       case J_BIG: {
         uint32_t q = uxQueueMessagesWaiting(jobQ) + 1; if (q > stMaxQueued) stMaxQueued = q;
         uint32_t t = millis();
-        memcpy(bounce, j.blk, j.len);
-        ok = bigPipeWrite(s.id, j.off, bounce, j.len);
+        const uint8_t* src = poolFast ? j.blk : (memcpy(bounce, j.blk, j.len), bounce);
+        ok = bigPipeWrite(s.id, j.off, src, j.len);
         stWriteMs += millis() - t; stBlocks++;
         break; }
       case J_MARK:
@@ -63,9 +68,9 @@ static void writerTask(void*) {
       case J_SPEED: {
         uint32_t q = uxQueueMessagesWaiting(jobQ) + 1; if (q > stMaxQueued) stMaxQueued = q;
         uint32_t t = millis();
-        memcpy(bounce, j.blk, j.len);
+        const uint8_t* src = poolFast ? j.blk : (memcpy(bounce, j.blk, j.len), bounce);
         if (!speedF) { mkdirs(TMP_ROOT "/speed"); speedF = store->open(SPEED_FILE, FILE_WRITE); }
-        ok = speedF && speedF.write(bounce, j.len) == j.len;
+        ok = speedF && speedF.write(src, j.len) == j.len;
         stWriteMs += millis() - t; stBlocks++;
         break; }
       case J_SPEED_CLOSE:
@@ -82,12 +87,30 @@ static bool pipeStart() {
   if (jobQ) return true;
   bool& failed = pipeFailed;
   if (failed) return false;
-  uint8_t* pool = (uint8_t*)heap_caps_malloc(PIPE_BLOCKS * UPLOAD_BUF, MALLOC_CAP_SPIRAM);
-  bounce = (uint8_t*)heap_caps_malloc(UPLOAD_BUF, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
   QueueHandle_t fq = xQueueCreate(PIPE_BLOCKS, sizeof(uint8_t*));
   QueueHandle_t jq = xQueueCreate(PIPE_BLOCKS + PIPE_SLOTS * 2 + 4, sizeof(Job));
-  if (!pool || !bounce || !fq || !jq) { failed = true; Serial.println("[shelf] card writer: not enough memory, writing directly"); return false; }
-  for (int i = 0; i < PIPE_BLOCKS; i++) { uint8_t* b = pool + i * UPLOAD_BUF; xQueueSend(fq, &b, 0); }
+  if (!fq || !jq) { failed = true; return false; }
+  // First choice: a few blocks in internal RAM. The writer peaks at ~4 queued blocks, and the
+  // card's DMA reads internal RAM directly, so nothing is copied through PSRAM, which the
+  // Wi-Fi's own buffers also live in.
+  uint8_t* fast[PIPE_FAST_MAX]; int nf = 0;
+  while (nf < PIPE_FAST_MAX && heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA) > PIPE_KEEP_FREE + UPLOAD_BUF) {
+    uint8_t* b = (uint8_t*)heap_caps_malloc(UPLOAD_BUF, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
+    if (!b) break;
+    fast[nf++] = b;
+  }
+  if (nf >= PIPE_FAST_MIN) {
+    for (int i = 0; i < nf; i++) xQueueSend(fq, &fast[i], 0);
+    poolFast = true; poolBlocks = nf;
+  } else {
+    for (int i = 0; i < nf; i++) free(fast[i]);
+    uint8_t* pool = (uint8_t*)heap_caps_malloc(PIPE_BLOCKS * UPLOAD_BUF, MALLOC_CAP_SPIRAM);
+    bounce = (uint8_t*)heap_caps_malloc(UPLOAD_BUF, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
+    if (!pool || !bounce) { failed = true; Serial.println("[shelf] card writer: not enough memory, writing directly"); return false; }
+    for (int i = 0; i < PIPE_BLOCKS; i++) { uint8_t* b = pool + i * UPLOAD_BUF; xQueueSend(fq, &b, 0); }
+    poolFast = false; poolBlocks = PIPE_BLOCKS;
+  }
+  Serial.printf("[shelf] card writer: %d x 16 KB blocks in %s\n", poolBlocks, poolFast ? "internal RAM" : "PSRAM");
   freeQ = fq; jobQ = jq;
   xTaskCreatePinnedToCore(writerTask, "cardwriter", 10240, nullptr, 3, nullptr, 1);   // network is on core 0
   return true;
@@ -191,6 +214,7 @@ String pipeStatsJson() {
   return String("{\"on\":") + (jobQ ? "true" : "false") + ",\"failed\":" + (pipeFailed ? "true" : "false") +
          ",\"blocks\":" + stBlocks + ",\"writeMs\":" + stWriteMs + ",\"takeWaitMs\":" + stTakeWaitMs +
          ",\"finishWaitMs\":" + stFinishWaitMs + ",\"maxQueued\":" + stMaxQueued + ",\"ms\":" + (millis() - stT0) +
+         ",\"pool\":\"" + (poolFast ? "internal" : "psram") + "\",\"poolBlocks\":" + poolBlocks +
          ",\"freePsram\":" + ESP.getFreePsram() + ",\"freeDma\":" + heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA) + "}";
 }
 #else
